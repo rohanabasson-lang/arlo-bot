@@ -1,62 +1,93 @@
 import sqlite3
 from datetime import datetime
 
-DB_PATH = "pricing.db"
-
+DB_PATH = "arlo.db"
 
 def get_conn():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
-
+return sqlite3.connect(DB_PATH)
 
 def init_db():
+conn = get_conn()
+c = conn.cursor()
 
-    conn = get_conn()
+```
+c.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    phone TEXT PRIMARY KEY,
+    industry TEXT,
+    created_at TEXT
+)
+""")
 
-    c = conn.cursor()
+c.execute("""
+CREATE TABLE IF NOT EXISTS quotes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone TEXT,
+    ref TEXT,
+    cost REAL,
+    price REAL,
+    profit REAL,
+    timestamp TEXT
+)
+""")
 
-    c.execute("""
+conn.commit()
+conn.close()
+```
 
-    CREATE TABLE IF NOT EXISTS quotes(
+def get_or_create_user(phone):
 
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts TEXT,
-        ref TEXT,
-        from_number TEXT,
-        text TEXT,
-        quote REAL,
-        cost REAL,
-        margin REAL
+```
+conn = get_conn()
+c = conn.cursor()
 
+c.execute("SELECT phone FROM users WHERE phone=?", (phone,))
+user = c.fetchone()
+
+if not user:
+    now = datetime.now().isoformat()
+
+    c.execute(
+        "INSERT INTO users (phone, created_at) VALUES (?,?)",
+        (phone, now)
     )
 
-    """)
-
     conn.commit()
 
-    return conn
+conn.close()
+```
 
+def save_quote(phone, ref, cost, price, profit):
 
-def add_quote(conn, data):
+```
+conn = get_conn()
+c = conn.cursor()
 
-    c = conn.cursor()
+now = datetime.now().isoformat()
 
-    c.execute("""
+c.execute(
+    "INSERT INTO quotes (phone, ref, cost, price, profit, timestamp) VALUES (?,?,?,?,?,?)",
+    (phone, ref, cost, price, profit, now)
+)
 
-    INSERT INTO quotes(
-    ts, ref, from_number, text, quote, cost, margin)
+conn.commit()
+conn.close()
+```
 
-    VALUES (?,?,?,?,?,?,?)
+def get_recent_quotes(phone, limit=3):
 
-    """, (
+```
+conn = get_conn()
+c = conn.cursor()
 
-        datetime.now().isoformat(),
-        data["ref"],
-        data["from"],
-        data["text"],
-        data["quote"],
-        data["cost"],
-        data["margin"]
+c.execute(
+    "SELECT ref, price, timestamp FROM quotes WHERE phone=? ORDER BY timestamp DESC LIMIT ?",
+    (phone, limit)
+)
 
-    ))
+rows = c.fetchall()
 
-    conn.commit()
+conn.close()
+
+return rows
+```
