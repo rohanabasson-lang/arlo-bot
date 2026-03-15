@@ -1,93 +1,103 @@
 import sqlite3
-from datetime import datetime
 
-DB_PATH = "arlo.db"
+DB_PATH = "pricing_construction.db"
+
 
 def get_conn():
-return sqlite3.connect(DB_PATH)
+    return sqlite3.connect(DB_PATH)
+
 
 def init_db():
-conn = get_conn()
-c = conn.cursor()
+    conn = get_conn()
+    c = conn.cursor()
 
-```
-c.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    phone TEXT PRIMARY KEY,
-    industry TEXT,
-    created_at TEXT
-)
-""")
-
-c.execute("""
-CREATE TABLE IF NOT EXISTS quotes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone TEXT,
-    ref TEXT,
-    cost REAL,
-    price REAL,
-    profit REAL,
-    timestamp TEXT
-)
-""")
-
-conn.commit()
-conn.close()
-```
-
-def get_or_create_user(phone):
-
-```
-conn = get_conn()
-c = conn.cursor()
-
-c.execute("SELECT phone FROM users WHERE phone=?", (phone,))
-user = c.fetchone()
-
-if not user:
-    now = datetime.now().isoformat()
-
-    c.execute(
-        "INSERT INTO users (phone, created_at) VALUES (?,?)",
-        (phone, now)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone TEXT UNIQUE
     )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS quotes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        roof_m2 REAL,
+        fascia_m REAL,
+        barge_m REAL,
+        quote REAL,
+        total_cost REAL,
+        margin REAL,
+        original_text TEXT
+    )
+    """)
 
     conn.commit()
+    conn.close()
 
-conn.close()
-```
 
-def save_quote(phone, ref, cost, price, profit):
+def get_or_create_user(phone):
+    conn = get_conn()
+    c = conn.cursor()
 
-```
-conn = get_conn()
-c = conn.cursor()
+    c.execute("SELECT id FROM users WHERE phone=?", (phone,))
+    row = c.fetchone()
 
-now = datetime.now().isoformat()
+    if row:
+        user_id = row[0]
+    else:
+        c.execute("INSERT INTO users (phone) VALUES (?)", (phone,))
+        conn.commit()
+        user_id = c.lastrowid
 
-c.execute(
-    "INSERT INTO quotes (phone, ref, cost, price, profit, timestamp) VALUES (?,?,?,?,?,?)",
-    (phone, ref, cost, price, profit, now)
-)
+    conn.close()
+    return user_id
 
-conn.commit()
-conn.close()
-```
 
-def get_recent_quotes(phone, limit=3):
+def save_quote(user_id, roof_m2, fascia_m, barge_m, quote, total_cost, margin, original_text):
+    conn = get_conn()
+    c = conn.cursor()
 
-```
-conn = get_conn()
-c = conn.cursor()
+    c.execute("""
+    INSERT INTO quotes (
+        user_id,
+        roof_m2,
+        fascia_m,
+        barge_m,
+        quote,
+        total_cost,
+        margin,
+        original_text
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        user_id,
+        roof_m2,
+        fascia_m,
+        barge_m,
+        quote,
+        total_cost,
+        margin,
+        original_text
+    ))
 
-c.execute(
-    "SELECT ref, price, timestamp FROM quotes WHERE phone=? ORDER BY timestamp DESC LIMIT ?",
-    (phone, limit)
-)
+    conn.commit()
+    conn.close()
 
-rows = c.fetchall()
 
-conn.close()
+def get_recent_quotes(limit=10):
+    conn = get_conn()
+    c = conn.cursor()
 
-return rows
-```
+    c.execute("""
+    SELECT ts, roof_m2, fascia_m, barge_m, quote, margin
+    FROM quotes
+    ORDER BY ts DESC
+    LIMIT ?
+    """, (limit,))
+
+    rows = c.fetchall()
+    conn.close()
+
+    return rows
