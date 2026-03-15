@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from database import init_db, get_or_create_user, save_quote, get_recent_quotes
 
-app = Flask(**name**)
+app = Flask(__name__)
 
 init_db()
 
