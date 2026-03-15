@@ -1,67 +1,56 @@
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import re
-import uuid
-from datetime import datetime, timedelta
+import random
+import string
+from datetime import datetime
 
 from database import init_db, get_or_create_user, save_quote, get_recent_quotes
 
 app = Flask(__name__)
 
+# Initialize database
+
 init_db()
 
+# In-memory sessions
+
 sessions = {}
-SESSION_TIMEOUT = 86400
-
-def clean_sessions():
-
-```
-now = datetime.now()
-
-for num in list(sessions.keys()):
-    if (now - sessions[num]["last_active"]).total_seconds() > SESSION_TIMEOUT:
-        del sessions[num]
-```
 
 def make_quote_ref():
-
-```
-return "ARLO-" + uuid.uuid4().hex[:6].upper()
-```
+return "ARLO-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
 
 def parse_money_value(text):
-
-```
 match = re.search(r'(\d+(?:[.,]\d+)?)', text)
-
 if not match:
-    return None
-
+return None
 try:
-    return float(match.group(1).replace(",", ""))
+return float(match.group(1).replace(",", ""))
 except:
-    return None
-```
+return None
 
-def classify_cost_line(line):
-
-```
+def classify_cost_line(line, value):
 line = line.lower()
 
-if any(k in line for k in ["labour", "labor", "manhour", "crew"]):
-    return "labour"
+```
+if any(k in line for k in ["labour", "labor", "crew", "manhour"]):
+    return "labour", value
 
-if any(k in line for k in ["material", "mat", "supply", "mats"]):
-    return "materials"
+if any(k in line for k in ["material", "mat", "supply"]):
+    return "materials", value
 
 if any(k in line for k in ["equip", "machine", "plant", "hire"]):
-    return "equipment"
+    return "equipment", value
 
 if any(k in line for k in ["transport", "delivery", "logistic", "cartage"]):
-    return "transport"
+    return "transport", value
 
-return None
+return None, None
 ```
+
+def reply_text(msg, text):
+msg.body(text)
+return str(msg)
 
 @app.route("/")
 def home():
@@ -71,8 +60,6 @@ return "ARLO is alive"
 def whatsapp():
 
 ```
-clean_sessions()
-
 incoming_msg = request.values.get("Body", "").strip()
 from_number = request.values.get("From")
 
@@ -81,41 +68,41 @@ txt = incoming_msg.lower()
 resp = MessagingResponse()
 msg = resp.message()
 
+# Session
 if from_number not in sessions:
-
     sessions[from_number] = {
         "industry": None,
         "cost": None,
         "price": None,
-        "profit": None,
-        "quote_ref": None,
-        "last_active": datetime.now()
+        "profit": None
     }
 
 session = sessions[from_number]
-session["last_active"] = datetime.now()
 
+# HELP / MENU
 if txt in ["hi", "hello", "start", "menu", "help"]:
 
-    msg.body(
-        "ARLO AI Pricing Assistant\n\n"
-        "Commands:\n"
-        "industry → choose trade\n"
-        "reduce by 15%\n"
-        "generate quote\n"
-        "history → see recent quotes"
+    return reply_text(msg,
+    "ARLO AI Pricing Assistant\n\n"
+    "Commands:\n"
+    "industry → choose trade\n"
+    "reduce by 10% → simulate discount\n"
+    "generate quote → create client quote\n"
+    "history → view recent quotes"
     )
 
+# INDUSTRY MENU
 elif txt == "industry":
 
-    msg.body(
-        "Select your industry:\n\n"
-        "1 Construction\n"
-        "2 Plumbing\n"
-        "3 Electrical\n\n"
-        "Reply with 1,2,3"
+    return reply_text(msg,
+    "Select your industry:\n\n"
+    "1 Construction\n"
+    "2 Plumbing\n"
+    "3 Electrical\n\n"
+    "Reply with 1, 2 or 3"
     )
 
+# INDUSTRY CHOICE
 elif txt in ["1", "2", "3"]:
 
     industries = {
@@ -126,23 +113,21 @@ elif txt in ["1", "2", "3"]:
 
     session["industry"] = industries[txt]
 
-    msg.body(
-        f"{industries[txt]} selected.\n\n"
-        "Send job costs like:\n\n"
-        "Labour 60000\n"
-        "Materials 90000\n"
-        "Equipment 12000\n"
-        "Transport 3000"
+    return reply_text(msg,
+    f"{industries[txt]} selected.\n\n"
+    "Send job costs like:\n\n"
+    "Labour 60000\n"
+    "Materials 90000\n"
+    "Equipment 12000\n"
+    "Transport 3000"
     )
 
+# COST INPUT
 elif any(k in txt for k in ["labour", "material", "equip", "transport", "delivery"]):
 
-    lines = txt.split("\n")
+    lines = incoming_msg.split("\n")
 
-    labour = 0
-    materials = 0
-    equipment = 0
-    transport = 0
+    labour = materials = equipment = transport = 0
 
     for line in lines:
 
@@ -151,83 +136,70 @@ elif any(k in txt for k in ["labour", "material", "equip", "transport", "deliver
         if value is None:
             continue
 
-        category = classify_cost_line(line)
+        category, amount = classify_cost_line(line, value)
 
         if category == "labour":
-            labour = value
+            labour = amount
 
         elif category == "materials":
-            materials = value
+            materials = amount
 
         elif category == "equipment":
-            equipment = value
+            equipment = amount
 
         elif category == "transport":
-            transport = value
+            transport = amount
 
     total_cost = labour + materials + equipment + transport
 
     if total_cost == 0:
-
-        msg.body(
-            "Couldn't read numbers.\n\n"
-            "Try:\n"
-            "Labour 60000\n"
-            "Materials 90000"
+        return reply_text(msg,
+        "Could not detect numbers.\n\n"
+        "Try format:\n"
+        "Labour 60000\n"
+        "Materials 90000"
         )
 
-        return str(resp)
-
     margin = 0.30
-
     recommended_price = total_cost / (1 - margin)
-
     profit = recommended_price - total_cost
-
-    quote_ref = make_quote_ref()
 
     session["cost"] = total_cost
     session["price"] = recommended_price
     session["profit"] = profit
-    session["quote_ref"] = quote_ref
 
+    quote_ref = make_quote_ref()
+
+    # Save to database
     get_or_create_user(from_number)
+    save_quote(from_number, quote_ref, total_cost, recommended_price, profit)
 
-    save_quote(
-        from_number,
-        quote_ref,
-        total_cost,
-        recommended_price,
-        profit
+    return reply_text(msg,
+    f"ARLO Quote Analysis\n\n"
+    f"Industry: {session['industry'] or 'Not selected'}\n\n"
+    f"Total Cost:     R{total_cost:,.2f}\n"
+    f"Recommended:    R{recommended_price:,.2f}\n"
+    f"Expected Profit:R{profit:,.2f}\n"
+    f"Margin:         30%\n\n"
+    f"Next:\n"
+    f"reduce by 15%\n"
+    f"generate quote"
     )
 
-    msg.body(
-        f"ARLO Quote Analysis\n\n"
-        f"Industry: {session['industry'] or 'Not selected'}\n\n"
-        f"Total Cost: R{total_cost:,.2f}\n"
-        f"Recommended Price: R{recommended_price:,.2f}\n"
-        f"Expected Profit: R{profit:,.2f}\n"
-        f"Margin: 30%\n\n"
-        f"Next:\n"
-        f"reduce by 15%\n"
-        f"generate quote"
-    )
-
-elif "reduce by" in txt or "discount" in txt:
+# DISCOUNT SIMULATION
+elif "reduce" in txt or "discount" in txt:
 
     if session["price"] is None:
-
-        msg.body("Run pricing analysis first.")
-
-        return str(resp)
+        return reply_text(msg,
+        "Run pricing analysis first."
+        )
 
     match = re.search(r'(\d+(?:\.\d+)?)', txt)
 
     if not match:
-
-        msg.body("Specify discount like: reduce by 10%")
-
-        return str(resp)
+        return reply_text(msg,
+        "Specify discount % like: reduce by 10%"
+        )
 
     discount_pct = float(match.group(1)) / 100
 
@@ -235,73 +207,60 @@ elif "reduce by" in txt or "discount" in txt:
 
     new_margin = ((new_price - session["cost"]) / new_price) * 100
 
-    msg.body(
-        f"Discount Simulation\n\n"
-        f"Original Price: R{session['price']:,.2f}\n"
-        f"Discount: {int(discount_pct*100)}%\n"
-        f"New Price: R{new_price:,.2f}\n"
-        f"New Margin: {new_margin:.1f}%\n\n"
-        f"{'⚠️ Margin too low' if new_margin < 25 else 'Still profitable'}"
+    return reply_text(msg,
+    f"Discount Simulation\n\n"
+    f"Original Price: R{session['price']:,.2f}\n"
+    f"Discount:       {int(discount_pct*100)}%\n"
+    f"New Price:      R{new_price:,.2f}\n"
+    f"New Margin:     {new_margin:.1f}%"
     )
 
+# CLIENT QUOTE
 elif "generate quote" in txt:
 
     if session["price"] is None:
+        return reply_text(msg,
+        "Run pricing analysis first."
+        )
 
-        msg.body("Run pricing analysis first.")
+    ref = make_quote_ref()
 
-        return str(resp)
-
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    msg.body(
-        f"CLIENT QUOTATION\n\n"
-        f"Quote Ref: {session['quote_ref']}\n"
-        f"Date: {today}\n\n"
-        f"Project: {session['industry']} Works\n"
-        f"Total Price: R{session['price']:,.2f}\n\n"
-        f"Inclusions:\n"
-        f"Labour\n"
-        f"Materials\n"
-        f"Equipment\n"
-        f"Transport\n\n"
-        f"Valid for 14 days.\n\n"
-        f"Prepared by ARLO\n"
-        f"The Profit Prophet"
+    return reply_text(msg,
+    f"CLIENT QUOTATION\n\n"
+    f"Quote Ref: {ref}\n"
+    f"Date: {datetime.now().strftime('%Y-%m-%d')}\n\n"
+    f"Project: {session['industry']} Works\n"
+    f"Total Price: R{session['price']:,.2f}\n\n"
+    f"Inclusions:\n"
+    f"Labour\nMaterials\nEquipment\nTransport\n\n"
+    f"Prepared by ARLO"
     )
 
+# HISTORY
 elif txt in ["history", "my quotes"]:
 
     quotes = get_recent_quotes(from_number)
 
     if not quotes:
+        return reply_text(msg,
+        "No previous quotes found."
+        )
 
-        msg.body("No quotes yet.")
-
-        return str(resp)
-
-    lines = ["Your recent ARLO quotes:\n"]
+    lines = ["Recent ARLO Quotes:\n"]
 
     for ref, price, ts in quotes:
-
         date = ts[:10]
-
         lines.append(f"{date} | {ref} | R{price:,.2f}")
 
-    msg.body("\n".join(lines))
+    return reply_text(msg, "\n".join(lines))
 
+# DEFAULT
 else:
 
-    msg.body(
-        "ARLO AI Pricing Assistant\n\n"
-        "Commands:\n"
-        "industry\n"
-        "reduce by 15%\n"
-        "generate quote\n"
-        "history"
+    return reply_text(msg,
+    "ARLO AI Pricing Assistant\n\n"
+    "Type 'help' to see commands."
     )
-
-return str(resp)
 ```
 
 if **name** == "**main**":
