@@ -1,186 +1,230 @@
+import os
+import re
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
-import re
-
-from database import init_db, get_or_create_user, save_quote
+from database import init_db, get_or_create_user, save_quote, get_recent_quotes
 
 app = Flask(__name__)
 
-# -----------------------------
-# Initialize database
-# -----------------------------
 init_db()
 
 # -----------------------------
-# Pricing assumptions
+# Industry presets
 # -----------------------------
-ROOF_RATE = 120
-FASCIA_RATE = 85
-BARGE_RATE = 90
 
-MARGIN_TARGET = 0.30
-
+INDUSTRIES = {
+    "1": "Construction",
+    "2": "Electrical",
+    "3": "Painting"
+}
 
 # -----------------------------
-# Root route (Render health check)
+# Helper functions
 # -----------------------------
+
+def extract_costs(text):
+    labour = re.search(r"labour\s*(\d+)", text)
+    materials = re.search(r"materials\s*(\d+)", text)
+    equipment = re.search(r"equipment\s*(\d+)", text)
+    transport = re.search(r"transport\s*(\d+)", text)
+
+    return {
+        "labour": float(labour.group(1)) if labour else 0,
+        "materials": float(materials.group(1)) if materials else 0,
+        "equipment": float(equipment.group(1)) if equipment else 0,
+        "transport": float(transport.group(1)) if transport else 0
+    }
+
+def calculate_quote(costs):
+
+    direct_cost = sum(costs.values())
+
+    overhead = direct_cost * 0.19
+    protected_cost = direct_cost + overhead
+
+    margin = 0.30
+
+    recommended_quote = protected_cost / (1 - margin)
+
+    return {
+        "direct_cost": direct_cost,
+        "protected_cost": protected_cost,
+        "recommended_quote": recommended_quote,
+        "margin": margin
+    }
+
+# -----------------------------
+# Routes
+# -----------------------------
+
 @app.route("/")
 def home():
-    return "ARLO is running"
+    return "ARLO AI Pricing Assistant running."
 
-
-# -----------------------------
-# Helper: extract numbers
-# -----------------------------
-def parse_job(text):
-
-    roof = re.search(r"roof\s*(\d+)", text)
-    fascia = re.search(r"fascia\s*(\d+)", text)
-    barge = re.search(r"barge\s*(\d+)", text)
-
-    roof = int(roof.group(1)) if roof else 0
-    fascia = int(fascia.group(1)) if fascia else 0
-    barge = int(barge.group(1)) if barge else 0
-
-    return roof, fascia, barge
-
-
-# -----------------------------
-# Pricing engine
-# -----------------------------
-def calculate_price(roof, fascia, barge):
-
-    roof_cost = roof * ROOF_RATE
-    fascia_cost = fascia * FASCIA_RATE
-    barge_cost = barge * BARGE_RATE
-
-    total_cost = roof_cost + fascia_cost + barge_cost
-
-    price = total_cost / (1 - MARGIN_TARGET)
-
-    margin = (price - total_cost) / price
-
-    return round(price, 2), round(total_cost, 2), round(margin * 100, 2)
-
-
-# -----------------------------
-# WhatsApp webhook
-# -----------------------------
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp():
 
     incoming_msg = request.values.get("Body", "").lower()
-    from_number = request.values.get("From")
+    phone = request.values.get("From")
 
     resp = MessagingResponse()
     msg = resp.message()
 
-    # register user
-    user_id = get_or_create_user(from_number)
+    user = get_or_create_user(phone)
+
+    state = user["state"]
 
     # -----------------------------
-    # Discount command
+    # INDUSTRY COMMAND
     # -----------------------------
-    if "reduce by" in incoming_msg:
 
-        discount = re.search(r"(\d+)", incoming_msg)
+    if "industry" in incoming_msg:
 
-        if discount:
-            percent = int(discount.group(1))
+        msg.body(
+            "ARLO Industry Presets\n\n"
+            "1 Construction\n"
+            "2 Electrical\n"
+            "3 Painting\n\n"
+            "Reply with the number of your industry."
+        )
+
+        user["state"] = "awaiting_industry"
+        return str(resp)
+
+    # -----------------------------
+    # INDUSTRY SELECTION
+    # -----------------------------
+
+    if state == "awaiting_industry":
+
+        if incoming_msg.strip() in INDUSTRIES:
+
+            industry = INDUSTRIES[incoming_msg.strip()]
+            user["industry"] = industry
+            user["state"] = "awaiting_costs"
 
             msg.body(
-                f"ARLO Pricing Adjustment\n\n"
-                f"Discount simulation: {percent}%\n\n"
-                f"Send 'generate quote' to apply this adjustment."
+                f"{industry} pricing drivers\n\n"
+                "Labour hours\n"
+                "Material cost\n"
+                "Equipment hire\n"
+                "Transport / logistics\n\n"
+                "Example input:\n\n"
+                "Labour 45000\n"
+                "Materials 80000\n"
+                "Equipment 12000\n"
+                "Transport 5000"
             )
 
         else:
-            msg.body("Please specify a discount percentage.")
+
+            msg.body("Please reply with 1, 2 or 3.")
 
         return str(resp)
 
     # -----------------------------
-    # Job specification
+    # COST INPUT
     # -----------------------------
-    if "roof" in incoming_msg or "fascia" in incoming_msg or "barge" in incoming_msg:
 
-        roof, fascia, barge = parse_job(incoming_msg)
+    if state == "awaiting_costs":
 
-        price, total_cost, margin = calculate_price(roof, fascia, barge)
+        costs = extract_costs(incoming_msg)
+
+        if sum(costs.values()) == 0:
+
+            msg.body("Please send costs like:\nLabour 45000\nMaterials 80000\nEquipment 12000\nTransport 5000")
+
+            return str(resp)
+
+        quote = calculate_quote(costs)
+
+        user["last_quote"] = quote["recommended_quote"]
+        user["last_cost"] = quote["protected_cost"]
+        user["state"] = "quote_ready"
 
         save_quote(
-            user_id,
-            roof,
-            fascia,
-            barge,
-            price,
-            total_cost,
-            margin,
-            incoming_msg
+            phone,
+            quote["recommended_quote"],
+            quote["protected_cost"],
+            quote["margin"]
         )
 
         msg.body(
-
-            f"ARLO Quote Analysis\n\n"
-
-            f"Roof: {roof} m²\n"
-            f"Fascia: {fascia} m\n"
-            f"Barge: {barge} m\n\n"
-
-            f"Estimated Cost: R{total_cost}\n"
-            f"Recommended Price: R{price}\n"
-            f"Margin: {margin}%\n\n"
-
-            f"Commands:\n"
-            f"reduce by 10%\n"
-            f"generate quote"
+            "ARLO Pricing Analysis\n\n"
+            f"Direct Cost\nR{quote['direct_cost']:,.0f}\n\n"
+            f"Protected Cost\nR{quote['protected_cost']:,.0f}\n\n"
+            f"Recommended Quote\nR{quote['recommended_quote']:,.0f}\n\n"
+            f"Margin Protected\n{quote['margin']*100:.1f}%\n\n"
+            "South African Construction Benchmark\n\n"
+            "Typical contractor net margin\n≈ 3% – 5%\n\n"
+            "With ARLO guardrails\n≈ 8% – 12%\n\n"
+            "Commands\n\n"
+            "reduce by 10%\n"
+            "generate quote\n"
+            "industry"
         )
 
         return str(resp)
 
     # -----------------------------
-    # Generate client quote
+    # DISCOUNT SIMULATION
     # -----------------------------
+
+    if "reduce by" in incoming_msg:
+
+        match = re.search(r"reduce by (\d+)", incoming_msg)
+
+        if match and user["last_quote"]:
+
+            discount = float(match.group(1)) / 100
+
+            new_price = user["last_quote"] * (1 - discount)
+
+            margin = (new_price - user["last_cost"]) / new_price
+
+            profit_lost = user["last_quote"] - new_price
+
+            msg.body(
+                "⚠ Profit Leak Detected\n\n"
+                f"Previous Quote: R{user['last_quote']:,.0f}\n"
+                f"Discount Applied: {discount*100:.0f}%\n\n"
+                f"New Quote: R{new_price:,.0f}\n"
+                f"Protected Cost: R{user['last_cost']:,.0f}\n\n"
+                f"New Margin: {margin*100:.1f}%\n"
+                f"Profit Lost: R{profit_lost:,.0f}\n\n"
+                f"Tip: Stay near R{user['last_quote']:,.0f} to protect profit."
+            )
+
+        return str(resp)
+
+    # -----------------------------
+    # GENERATE CLIENT QUOTE
+    # -----------------------------
+
     if "generate quote" in incoming_msg:
 
-        msg.body(
+        if user["last_quote"]:
 
-            "ARLO Client Quote\n\n"
-
-            "Project pricing prepared.\n"
-            "All costs verified.\n"
-            "Margin protected.\n\n"
-
-            "You can confidently send this to your client."
-
-        )
+            msg.body(
+                "Client Quote\n\n"
+                f"Total Project Price\nR{user['last_quote']:,.0f}\n\n"
+                "Prepared by ARLO AI Pricing Assistant\n"
+                "Profit-Protected Pricing"
+            )
 
         return str(resp)
 
     # -----------------------------
-    # Default message
+    # DEFAULT RESPONSE
     # -----------------------------
+
     msg.body(
-
         "ARLO AI Pricing Assistant\n\n"
-
-        "Send job specs like this:\n\n"
-
-        "Roof 320\n"
-        "Fascia 20\n"
-        "Barge 10\n\n"
-
-        "Commands:\n"
-        "reduce by 10%\n"
-        "generate quote"
-
+        "Type 'industry' to start pricing."
     )
 
     return str(resp)
 
 
-# -----------------------------
-# Local run (not used on Render)
-# -----------------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
