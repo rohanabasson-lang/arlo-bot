@@ -1,10 +1,13 @@
 import sqlite3
+from datetime import datetime
 
-DB_PATH = "pricing_construction.db"
+DB_PATH = "arlo.db"
 
 
 def get_conn():
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def init_db():
@@ -13,23 +16,24 @@ def init_db():
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        phone TEXT UNIQUE
+        phone TEXT PRIMARY KEY,
+        industry TEXT,
+        created_at TEXT
     )
     """)
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS quotes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        roof_m2 REAL,
-        fascia_m REAL,
-        barge_m REAL,
-        quote REAL,
-        total_cost REAL,
-        margin REAL,
-        original_text TEXT
+        phone TEXT NOT NULL,
+        ref TEXT NOT NULL,
+        direct_cost REAL NOT NULL,
+        protected_cost REAL NOT NULL,
+        price REAL NOT NULL,
+        profit REAL NOT NULL,
+        margin REAL NOT NULL,
+        raw_input TEXT,
+        timestamp TEXT NOT NULL
     )
     """)
 
@@ -37,67 +41,70 @@ def init_db():
     conn.close()
 
 
-def get_or_create_user(phone):
+def get_or_create_user(phone: str):
     conn = get_conn()
     c = conn.cursor()
 
-    c.execute("SELECT id FROM users WHERE phone=?", (phone,))
+    c.execute("SELECT * FROM users WHERE phone = ?", (phone,))
     row = c.fetchone()
 
-    if row:
-        user_id = row[0]
-    else:
-        c.execute("INSERT INTO users (phone) VALUES (?)", (phone,))
+    if row is None:
+        now = datetime.now().isoformat()
+        c.execute(
+            "INSERT INTO users (phone, industry, created_at) VALUES (?, ?, ?)",
+            (phone, None, now)
+        )
         conn.commit()
-        user_id = c.lastrowid
+        c.execute("SELECT * FROM users WHERE phone = ?", (phone,))
+        row = c.fetchone()
 
     conn.close()
-    return user_id
+    return dict(row)
 
 
-def save_quote(user_id, roof_m2, fascia_m, barge_m, quote, total_cost, margin, original_text):
+def update_user_industry(phone: str, industry: str):
     conn = get_conn()
     c = conn.cursor()
+    c.execute(
+        "UPDATE users SET industry = ? WHERE phone = ?",
+        (industry, phone)
+    )
+    conn.commit()
+    conn.close()
+
+
+def save_quote(phone: str, ref: str, direct_cost: float, protected_cost: float,
+               price: float, profit: float, margin: float, raw_input: str):
+    conn = get_conn()
+    c = conn.cursor()
+    ts = datetime.now().isoformat()
 
     c.execute("""
     INSERT INTO quotes (
-        user_id,
-        roof_m2,
-        fascia_m,
-        barge_m,
-        quote,
-        total_cost,
-        margin,
-        original_text
+        phone, ref, direct_cost, protected_cost, price, profit, margin, raw_input, timestamp
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        user_id,
-        roof_m2,
-        fascia_m,
-        barge_m,
-        quote,
-        total_cost,
-        margin,
-        original_text
+        phone, ref, direct_cost, protected_cost, price, profit, margin, raw_input, ts
     ))
 
     conn.commit()
     conn.close()
 
 
-def get_recent_quotes(limit=10):
+def get_recent_quotes(phone: str, limit: int = 3):
     conn = get_conn()
     c = conn.cursor()
 
     c.execute("""
-    SELECT ts, roof_m2, fascia_m, barge_m, quote, margin
+    SELECT ref, direct_cost, protected_cost, price, profit, margin, raw_input, timestamp
     FROM quotes
-    ORDER BY ts DESC
+    WHERE phone = ?
+    ORDER BY timestamp DESC
     LIMIT ?
-    """, (limit,))
+    """, (phone, limit))
 
     rows = c.fetchall()
     conn.close()
 
-    return rows
+    return [dict(r) for r in rows]
