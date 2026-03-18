@@ -6,46 +6,37 @@ import secrets
 
 from database import init_db, save_quote, get_recent_quotes
 
-# INIT DB
 init_db()
 
-# PAGE CONFIG
 st.set_page_config(page_title="ARLO Pricing Engine", layout="centered")
 
-# ─────────────────────────────────────────────
 # HEADER
-# ─────────────────────────────────────────────
 st.markdown("""
 <h2 style='text-align:center;'>🏗️ ARLO Pricing Engine</h2>
 <p style='text-align:center; color:#888;'>Stop underpricing. Protect your profit on every job.</p>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────
 # INPUTS
-# ─────────────────────────────────────────────
 st.subheader("Job Costs")
 
 col1, col2 = st.columns(2)
 
-labour     = col1.number_input("Labour (R)", min_value=0.0, step=1.0)
-materials  = col1.number_input("Materials (R)", min_value=0.0, step=1.0)
-equipment  = col2.number_input("Equipment / Hire (R)", min_value=0.0, step=1.0)
-other      = col2.number_input("Transport / Other (R)", min_value=0.0, step=1.0)
+labour = col1.number_input("Labour (R)", min_value=0.0, step=1.0)
+materials = col1.number_input("Materials (R)", min_value=0.0, step=1.0)
+equipment = col2.number_input("Equipment / Hire (R)", min_value=0.0, step=1.0)
+other = col2.number_input("Transport / Other (R)", min_value=0.0, step=1.0)
 
 project_name = st.text_input("Project Name (optional)", "")
 
 st.markdown("---")
 
 overhead_pct = st.slider("Overhead %", 10, 30, 18)
-margin_pct   = st.slider("Target Margin %", 20, 45, 30)
+margin_pct = st.slider("Target Margin %", 20, 45, 30)
 
-# ─────────────────────────────────────────────
 # CALCULATE
-# ─────────────────────────────────────────────
 if st.button("💰 Generate Client-Ready Quote", use_container_width=True):
 
     try:
-        # VALIDATION
         if margin_pct >= 100:
             st.error("Margin must be below 100%")
             st.stop()
@@ -54,42 +45,35 @@ if st.button("💰 Generate Client-Ready Quote", use_container_width=True):
             st.error("Enter at least one cost value")
             st.stop()
 
-        # CALCULATIONS
         direct_cost = labour + materials + equipment + other
-        overhead    = direct_cost * (overhead_pct / 100)
-        total_cost  = direct_cost + overhead
+        overhead = direct_cost * (overhead_pct / 100)
+        total_cost = direct_cost + overhead
 
-        price   = total_cost / (1 - margin_pct / 100)
-        profit  = price - total_cost
+        price = total_cost / (1 - margin_pct / 100)
+        profit = price - total_cost
         margin_actual = (profit / price) * 100 if price > 0 else 0
-
         walkaway = total_cost / (1 - 0.20)
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        # SAVE TO DB
-        try:
-            save_quote({
-                "timestamp": timestamp,
-                "project_name": project_name,
-                "labour": labour,
-                "materials": materials,
-                "equipment": equipment,
-                "other": other,
-                "overhead_pct": overhead_pct,
-                "margin_target": margin_pct,
-                "total_cost": total_cost,
-                "price": price,
-                "profit": profit,
-                "margin": margin_actual,
-                "walkaway": walkaway
-            })
-        except Exception as e:
-            st.warning(f"Saved locally only (DB issue: {str(e)})")
+        # SAVE
+        save_quote({
+            "timestamp": timestamp,
+            "project_name": project_name,
+            "labour": labour,
+            "materials": materials,
+            "equipment": equipment,
+            "other": other,
+            "overhead_pct": overhead_pct,
+            "margin_target": margin_pct,
+            "total_cost": total_cost,
+            "price": price,
+            "profit": profit,
+            "margin": margin_actual,
+            "walkaway": walkaway
+        })
 
-        # ─────────────────────────────────────
         # RESULTS
-        # ─────────────────────────────────────
         st.markdown("## 📊 Results")
 
         c1, c2, c3 = st.columns(3)
@@ -100,7 +84,6 @@ if st.button("💰 Generate Client-Ready Quote", use_container_width=True):
         st.metric("📈 Margin", f"{margin_actual:.1f}%")
         st.metric("🚫 Walk-Away Price", f"R{walkaway:,.0f}")
 
-        # INSIGHT
         if margin_actual < 25:
             st.error("⚠️ High risk — margin too low")
         elif margin_actual < 30:
@@ -113,9 +96,7 @@ if st.button("💰 Generate Client-Ready Quote", use_container_width=True):
             f"You are positioned at ~{margin_actual*0.4:.1f}%–{margin_actual*0.6:.1f}% net."
         )
 
-        # ─────────────────────────────────────
-        # PDF GENERATION
-        # ─────────────────────────────────────
+        # PDF
         pdf = FPDF()
         pdf.add_page()
 
@@ -153,7 +134,14 @@ Prepared by ARLO - The Profit Prophet
 Contact: 065 999 4443
 """)
 
-        pdf_bytes = pdf.output(dest="S").encode("latin-1", "ignore")
+        # 🔥 FIXED PDF OUTPUT
+        pdf_output = pdf.output(dest="S")
+
+        if isinstance(pdf_output, str):
+            pdf_bytes = pdf_output.encode("latin-1")
+        else:
+            pdf_bytes = pdf_output
+
         b64 = base64.b64encode(pdf_bytes).decode()
 
         filename = f"ARLO_Quote_{timestamp.replace(' ', '_')}.pdf"
@@ -164,9 +152,7 @@ Contact: 065 999 4443
     except Exception as e:
         st.error(f"Something went wrong: {str(e)}")
 
-# ─────────────────────────────────────────────
 # HISTORY
-# ─────────────────────────────────────────────
 st.markdown("---")
 st.subheader("📊 Recent Quotes")
 
@@ -181,8 +167,6 @@ else:
         )
         st.caption(f"{r.get('project_name') or 'General Works'}")
 
-# ─────────────────────────────────────────────
 # FOOTER
-# ─────────────────────────────────────────────
 st.markdown("---")
-st.caption("📱 Tip: Open on your phone → Share → Add to Home Screen")
+st.caption("📱 Tip: Add to Home Screen for app-like experience")
