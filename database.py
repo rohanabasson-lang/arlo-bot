@@ -1,110 +1,130 @@
 import sqlite3
-from datetime import datetime
+import logging
 
-DB_PATH = "arlo.db"
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+DB_PATH = "arlo_quotes.db"
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
 
 
 def init_db():
-    conn = get_conn()
-    c = conn.cursor()
+    try:
+        with get_conn() as conn:
+            c = conn.cursor()
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        phone TEXT PRIMARY KEY,
-        industry TEXT,
-        created_at TEXT
-    )
-    """)
+            c.execute("""
+            CREATE TABLE IF NOT EXISTS quotes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                phone_number TEXT,
+                company_name TEXT,
+                client_name TEXT,
+                project_name TEXT,
+                labour REAL DEFAULT 0,
+                materials REAL DEFAULT 0,
+                equipment REAL DEFAULT 0,
+                other REAL DEFAULT 0,
+                overhead_pct REAL DEFAULT 0,
+                margin_target REAL DEFAULT 0,
+                total_cost REAL NOT NULL,
+                price REAL NOT NULL,
+                profit REAL NOT NULL,
+                margin REAL NOT NULL,
+                walkaway REAL NOT NULL
+            )
+            """)
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS quotes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        phone TEXT NOT NULL,
-        ref TEXT NOT NULL,
-        direct_cost REAL NOT NULL,
-        protected_cost REAL NOT NULL,
-        price REAL NOT NULL,
-        profit REAL NOT NULL,
-        margin REAL NOT NULL,
-        raw_input TEXT,
-        timestamp TEXT NOT NULL
-    )
-    """)
+            c.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON quotes(timestamp)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_phone ON quotes(phone_number)")
 
-    conn.commit()
-    conn.close()
+            conn.commit()
 
+        logger.info("Database initialized")
 
-def get_or_create_user(phone: str):
-    conn = get_conn()
-    c = conn.cursor()
-
-    c.execute("SELECT * FROM users WHERE phone = ?", (phone,))
-    row = c.fetchone()
-
-    if row is None:
-        now = datetime.now().isoformat()
-        c.execute(
-            "INSERT INTO users (phone, industry, created_at) VALUES (?, ?, ?)",
-            (phone, None, now)
-        )
-        conn.commit()
-        c.execute("SELECT * FROM users WHERE phone = ?", (phone,))
-        row = c.fetchone()
-
-    conn.close()
-    return dict(row)
+    except Exception as e:
+        logger.error(f"DB init failed: {e}")
+        raise
 
 
-def update_user_industry(phone: str, industry: str):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        "UPDATE users SET industry = ? WHERE phone = ?",
-        (industry, phone)
-    )
-    conn.commit()
-    conn.close()
+def save_quote(data: dict):
+    try:
+        with get_conn() as conn:
+            c = conn.cursor()
+
+            c.execute("""
+            INSERT INTO quotes (
+                timestamp, phone_number, company_name, client_name, project_name,
+                labour, materials, equipment, other,
+                overhead_pct, margin_target,
+                total_cost, price, profit, margin, walkaway
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                data["timestamp"],
+                data.get("phone_number"),
+                data.get("company_name"),
+                data.get("client_name"),
+                data.get("project_name"),
+                data.get("labour", 0),
+                data.get("materials", 0),
+                data.get("equipment", 0),
+                data.get("other", 0),
+                data.get("overhead_pct", 0),
+                data.get("margin_target", 0),
+                data["total_cost"],
+                data["price"],
+                data["profit"],
+                data["margin"],
+                data["walkaway"]
+            ))
+
+            conn.commit()
+
+        logger.info("Quote saved")
+
+    except Exception as e:
+        logger.error(f"Save failed: {e}")
+        raise
 
 
-def save_quote(phone: str, ref: str, direct_cost: float, protected_cost: float,
-               price: float, profit: float, margin: float, raw_input: str):
-    conn = get_conn()
-    c = conn.cursor()
-    ts = datetime.now().isoformat()
+def get_recent_quotes(phone_number=None, limit=5):
+    try:
+        with get_conn() as conn:
+            c = conn.cursor()
 
-    c.execute("""
-    INSERT INTO quotes (
-        phone, ref, direct_cost, protected_cost, price, profit, margin, raw_input, timestamp
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        phone, ref, direct_cost, protected_cost, price, profit, margin, raw_input, ts
-    ))
+            if phone_number:
+                c.execute("""
+                SELECT timestamp, company_name, client_name, project_name, price, margin
+                FROM quotes
+                WHERE phone_number = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """, (phone_number, limit))
+            else:
+                c.execute("""
+                SELECT timestamp, company_name, client_name, project_name, price, margin
+                FROM quotes
+                ORDER BY id DESC
+                LIMIT ?
+                """, (limit,))
 
-    conn.commit()
-    conn.close()
+            rows = c.fetchall()
 
+        return [
+            {
+                "timestamp": r[0],
+                "company_name": r[1],
+                "client_name": r[2],
+                "project_name": r[3],
+                "price": r[4],
+                "margin": r[5]
+            }
+            for r in rows
+        ]
 
-def get_recent_quotes(phone: str, limit: int = 3):
-    conn = get_conn()
-    c = conn.cursor()
-
-    c.execute("""
-    SELECT ref, direct_cost, protected_cost, price, profit, margin, raw_input, timestamp
-    FROM quotes
-    WHERE phone = ?
-    ORDER BY timestamp DESC
-    LIMIT ?
-    """, (phone, limit))
-
-    rows = c.fetchall()
-    conn.close()
-
-    return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Fetch failed: {e}")
+        return []
