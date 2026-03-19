@@ -177,7 +177,7 @@ def make_pdf_bytes(
         f"Walk-Away Price: R{walk_away:,.0f}\n"
     )
     safe_summary = summary_text.encode("latin-1", errors="ignore").decode("latin-1")
-    pdf.multi_cell(0, 7, safe_summary)
+    pdf.multi_cell(180, 7, safe_summary)  # ← fixed: 180 instead of 0
 
     pdf.ln(4)
     pdf.set_font("Arial", "B", 12)
@@ -193,19 +193,18 @@ def make_pdf_bytes(
             f"Material: R{item['material_cost']:,.0f}"
         )
         safe_line = line.encode("latin-1", errors="ignore").decode("latin-1")
-        pdf.multi_cell(0, 7, safe_line)
+        pdf.multi_cell(180, 7, safe_line)  # ← fixed: 180 instead of 0
 
     pdf.ln(6)
     footer = "Prepared by ARLO - The Profit Prophet"
     safe_footer = footer.encode("latin-1", errors="ignore").decode("latin-1")
-    pdf.multi_cell(0, 7, safe_footer)
+    pdf.multi_cell(180, 7, safe_footer)  # ← fixed: 180 instead of 0
 
-    # FIXED: compatible with both old fpdf and current fpdf2 behavior
+    # Output handling (compatible with both old fpdf and fpdf2)
     pdf_output = pdf.output(dest='S')
     if isinstance(pdf_output, str):
         pdf_bytes = pdf_output.encode('latin-1', errors='ignore')
     else:
-        # fpdf2 returns bytearray or bytes
         pdf_bytes = bytes(pdf_output)
 
     return pdf_bytes
