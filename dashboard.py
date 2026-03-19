@@ -1,7 +1,7 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from fpdf import FPDF
 import base64
 
@@ -158,7 +158,8 @@ def make_pdf_bytes(
     pdf.cell(190, 8, f"Client: {user_name}", ln=True)
     pdf.cell(190, 8, f"Project: {project_name}", ln=True)
     pdf.cell(190, 8, f"Date: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
-    pdf.cell(190, 8, "Quote valid until: " + (datetime.now().replace(day=datetime.now().day+30).strftime('%Y-%m-%d')), ln=True)
+    valid_until = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+    pdf.cell(190, 8, f"Quote valid until: {valid_until}", ln=True)
 
     pdf.ln(8)
     pdf.set_font("Arial", "B", 12)
