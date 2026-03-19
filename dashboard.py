@@ -157,50 +157,49 @@ def make_pdf_bytes(
     pdf.set_font("Arial", size=11)
     pdf.cell(190, 8, f"Client: {user_name}", ln=True)
     pdf.cell(190, 8, f"Project: {project_name}", ln=True)
-    pdf.cell(190, 8, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True)
+    pdf.cell(190, 8, f"Date: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
+    pdf.cell(190, 8, "Quote valid until: " + (datetime.now().replace(day=datetime.now().day+30).strftime('%Y-%m-%d')), ln=True)
 
-    pdf.ln(5)
+    pdf.ln(8)
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 8, "Quote Summary", ln=True)
+    pdf.cell(190, 8, "Project Price Summary", ln=True)
 
     pdf.set_font("Arial", size=11)
     summary_text = (
-        f"Total Direct Cost: R{total_direct_cost:,.0f}\n"
-        f"Labour Portion: R{labour_portion:,.0f}\n"
-        f"Material Portion: R{material_portion:,.0f}\n"
-        f"Overhead ({overhead_pct:.0f}%): R{overhead_amount:,.0f}\n"
-        f"Total Cost: R{total_cost:,.0f}\n"
-        f"Target Price: R{price:,.0f}\n"
-        f"Suggested Price: R{suggested:,.0f}\n"
-        f"Profit: R{profit:,.0f}\n"
-        f"Margin: {margin:.1f}%\n"
-        f"Walk-Away Price: R{walk_away:,.0f}\n"
+        f"Total Project Price (excl. VAT): R{price:,.0f}\n"
+        f"VAT @ 15% will be added where applicable.\n"
+        f"Final amount due: R{price * 1.15:,.0f} (incl. VAT)"
     )
     safe_summary = summary_text.encode("latin-1", errors="ignore").decode("latin-1")
-    pdf.multi_cell(180, 7, safe_summary)  # ← fixed: 180 instead of 0
+    pdf.multi_cell(180, 7, safe_summary)
 
-    pdf.ln(4)
+    pdf.ln(6)
     pdf.set_font("Arial", "B", 12)
     pdf.cell(190, 8, "BOQ Breakdown", ln=True)
     pdf.set_font("Arial", size=11)
 
     for idx, item in enumerate(boq_items, start=1):
+        name_part = item['name'] if item['name'] else f"Item {idx}"
         line = (
-            f"{idx}. {item['name']} | Qty: {item['qty']:,.2f} | "
+            f"{idx}. {name_part} | "
+            f"Qty: {item['qty']:,.2f} | "
             f"Rate: R{item['rate']:,.0f} | "
-            f"Cost: R{item['cost']:,.0f} | "
-            f"Labour: R{item['labour_cost']:,.0f} | "
-            f"Material: R{item['material_cost']:,.0f}"
+            f"Subtotal: R{item['cost']:,.0f}"
         )
         safe_line = line.encode("latin-1", errors="ignore").decode("latin-1")
-        pdf.multi_cell(180, 7, safe_line)  # ← fixed: 180 instead of 0
+        pdf.multi_cell(180, 7, safe_line)
 
-    pdf.ln(6)
-    footer = "Prepared by ARLO - The Profit Prophet"
+    pdf.ln(10)
+    footer = (
+        "Prepared by ARLO - The Profit Prophet\n\n"
+        "Payment Terms: 50% deposit on acceptance, balance on practical completion.\n"
+        "Inclusions: As per BOQ above.\n"
+        "Exclusions: Variations, provisional sums, unforeseen site conditions.\n"
+        "All prices exclude VAT unless stated otherwise."
+    )
     safe_footer = footer.encode("latin-1", errors="ignore").decode("latin-1")
-    pdf.multi_cell(180, 7, safe_footer)  # ← fixed: 180 instead of 0
+    pdf.multi_cell(180, 7, safe_footer)
 
-    # Output handling (compatible with both old fpdf and fpdf2)
     pdf_output = pdf.output(dest='S')
     if isinstance(pdf_output, str):
         pdf_bytes = pdf_output.encode('latin-1', errors='ignore')
