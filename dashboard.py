@@ -9,13 +9,10 @@ import secrets
 # -----------------------------
 # PAGE CONFIG
 # -----------------------------
-st.set_page_config(
-    page_title="ARLO Pricing Engine",
-    layout="centered"
-)
+st.set_page_config(page_title="ARLO Pricing Engine", layout="centered")
 
 # -----------------------------
-# DB SETUP
+# DATABASE
 # -----------------------------
 conn = sqlite3.connect("arlo.db", check_same_thread=False)
 c = conn.cursor()
@@ -34,7 +31,7 @@ CREATE TABLE IF NOT EXISTS quotes (
 conn.commit()
 
 # -----------------------------
-# SESSION STATE (FIXED)
+# SESSION STATE (SAFE NAMES)
 # -----------------------------
 if "boq_items" not in st.session_state:
     st.session_state.boq_items = []
@@ -88,7 +85,7 @@ for i, item in enumerate(st.session_state.boq_items):
     st.caption(f"💰 Cost: R{cost:,.0f}")
 
 # -----------------------------
-# TOTAL COST
+# TOTAL
 # -----------------------------
 st.markdown(f"## 💰 Total Direct Cost: R{total_direct_cost:,.0f}")
 
@@ -99,54 +96,50 @@ overhead_pct = st.slider("Overhead %", 0, 100, 20)
 margin_pct = st.slider("Target Margin %", 0, 100, 30)
 
 # -----------------------------
-# CALC BUTTON
+# CALCULATE
 # -----------------------------
 if st.button("💰 Generate Quote"):
 
-    try:
-        if margin_pct >= 100:
-            st.error("Margin must be below 100%")
-            st.stop()
+    if margin_pct >= 100:
+        st.error("Margin must be below 100%")
+        st.stop()
 
-        if total_direct_cost == 0:
-            st.warning("Add at least one item")
-            st.stop()
+    if total_direct_cost == 0:
+        st.warning("Add at least one item")
+        st.stop()
 
-        overhead = total_direct_cost * (overhead_pct / 100)
-        total_cost = total_direct_cost + overhead
+    overhead = total_direct_cost * (overhead_pct / 100)
+    total_cost = total_direct_cost + overhead
 
-        price = total_cost / (1 - margin_pct / 100)
-        profit = price - total_cost
-        margin = (profit / price) * 100 if price > 0 else 0
+    price = total_cost / (1 - margin_pct / 100)
+    profit = price - total_cost
+    margin = (profit / price) * 100 if price > 0 else 0
 
-        walk_away = total_cost * 1.25
-        suggested = (price + walk_away) / 2
+    walk_away = total_cost * 1.25
+    suggested = (price + walk_away) / 2
 
-        st.session_state.results = {
-            "total_cost": total_cost,
-            "price": price,
-            "profit": profit,
-            "margin": margin,
-            "walk_away": walk_away,
-            "suggested": suggested
-        }
+    st.session_state.results = {
+        "total_cost": total_cost,
+        "price": price,
+        "profit": profit,
+        "margin": margin,
+        "walk_away": walk_away,
+        "suggested": suggested
+    }
 
-        # SAVE TO DB
-        c.execute("""
-        INSERT INTO quotes (ts, project, total_cost, price, profit, margin)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            datetime.now().strftime("%Y-%m-%d %H:%M"),
-            project_name,
-            total_cost,
-            price,
-            profit,
-            margin
-        ))
-        conn.commit()
-
-    except Exception as e:
-        st.error(f"Calculation error: {str(e)}")
+    # SAVE TO DB
+    c.execute("""
+    INSERT INTO quotes (ts, project, total_cost, price, profit, margin)
+    VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        datetime.now().strftime("%Y-%m-%d %H:%M"),
+        project_name,
+        total_cost,
+        price,
+        profit,
+        margin
+    ))
+    conn.commit()
 
 # -----------------------------
 # RESULTS
@@ -162,17 +155,17 @@ Total Cost: R{r['total_cost']:,.0f}
 
 Target Price: R{r['price']:,.0f}
 
-Suggested: R{r['suggested']:,.0f}
+Suggested Price: R{r['suggested']:,.0f}
 
 Profit: R{r['profit']:,.0f}
 
 Margin: {r['margin']:.1f}%
 
-Walk-Away: R{r['walk_away']:,.0f}
+🚫 Walk-Away Price: R{r['walk_away']:,.0f}
 """)
 
     # -------------------------
-    # DISCOUNT SIM (FIXED)
+    # DISCOUNT SIM
     # -------------------------
     st.markdown("## 🔻 Discount Simulation")
 
@@ -192,13 +185,13 @@ New Margin: {new_margin:.1f}%
 """)
 
     # -------------------------
-    # PDF EXPORT
+    # PDF EXPORT (FINAL SAFE)
     # -------------------------
     pdf = FPDF()
     pdf.add_page()
 
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(200, 10, "ARLO PROJECT QUOTE", ln=1, align="C")
+    pdf.cell(200, 10, "ARLO PROJECT QUOTATION", ln=1, align="C")
 
     pdf.set_font("Arial", size=12)
 
@@ -214,36 +207,51 @@ New Margin: {new_margin:.1f}%
 
     pdf.ln(5)
 
-    pdf.multi_cell(0, 8, f"""
+    pdf_text = f"""
 Total Cost: R{r['total_cost']:,.0f}
 Suggested: R{r['suggested']:,.0f}
 Walk-Away: R{r['walk_away']:,.0f}
 
 Prepared by ARLO - The Profit Prophet
-""")
+"""
 
-    pdf_output = pdf.output(dest="S").encode("latin-1")
-    b64 = base64.b64encode(pdf_output).decode()
+    safe_text = pdf_text.encode("latin-1", "ignore").decode("latin-1")
+    pdf.multi_cell(0, 8, safe_text)
 
-    href = f'<a href="data:application/pdf;base64,{b64}" download="arlo_quote.pdf">📄 Download PDF</a>'
+    # 🔥 FINAL FIX (NO BYTEARRAY ERROR)
+    pdf_raw = pdf.output(dest="S")
+
+    if isinstance(pdf_raw, str):
+        pdf_bytes = pdf_raw.encode("latin-1", "ignore")
+    else:
+        pdf_bytes = bytes(pdf_raw)
+
+    b64 = base64.b64encode(pdf_bytes).decode()
+
+    filename = f"ARLO_{ref}.pdf"
+
+    href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">📄 Download PDF Quote</a>'
     st.markdown(href, unsafe_allow_html=True)
 
 # -----------------------------
-# RECENT QUOTES
+# HISTORY
 # -----------------------------
 st.markdown("## 📊 Recent Quotes")
 
 df = pd.read_sql_query("SELECT * FROM quotes ORDER BY id DESC LIMIT 5", conn)
 
-for _, row in df.iterrows():
-    with st.expander(f"{row['ts']} | R{row['price']:,.0f}"):
-        st.write(f"Project: {row['project']}")
-        st.write(f"Profit: R{row['profit']:,.0f}")
-        st.write(f"Margin: {row['margin']:.1f}%")
+if df.empty:
+    st.info("No quotes yet.")
+else:
+    for _, row in df.iterrows():
+        with st.expander(f"{row['ts']} | R{row['price']:,.0f}"):
+            st.write(f"Project: {row['project']}")
+            st.write(f"Profit: R{row['profit']:,.0f}")
+            st.write(f"Margin: {row['margin']:.1f}%")
 
 # -----------------------------
 # FOOTER
 # -----------------------------
 st.markdown("---")
 st.caption("📱 Add to Home Screen → Use like an app")
-st.caption("Prepared by ARLO - The Profit Prophet")
+st.caption("ARLO by The Profit Prophet")
