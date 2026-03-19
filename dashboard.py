@@ -1,276 +1,250 @@
 import streamlit as st
+import pandas as pd
+import sqlite3
 from datetime import datetime
 from fpdf import FPDF
 import base64
 import secrets
 
-from database import init_db, save_quote, get_recent_quotes
+# -----------------------------
+# PAGE CONFIG
+# -----------------------------
+st.set_page_config(
+    page_title="ARLO Pricing Engine",
+    layout="centered"
+)
 
-init_db()
+# -----------------------------
+# DB SETUP
+# -----------------------------
+conn = sqlite3.connect("arlo.db", check_same_thread=False)
+c = conn.cursor()
 
-# ─────────────────────────────────────────────
-# CONFIG
-# ─────────────────────────────────────────────
-st.set_page_config(page_title="ARLO Pricing Engine", layout="centered")
+c.execute("""
+CREATE TABLE IF NOT EXISTS quotes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT,
+    project TEXT,
+    total_cost REAL,
+    price REAL,
+    profit REAL,
+    margin REAL
+)
+""")
+conn.commit()
 
-# ─────────────────────────────────────────────
-# SAFE SESSION STATE (CRITICAL)
-# ─────────────────────────────────────────────
-if "items" not in st.session_state or not isinstance(st.session_state.get("items"), list):
-    st.session_state["items"] = []
+# -----------------------------
+# SESSION STATE INIT
+# -----------------------------
+if "items" not in st.session_state:
+    st.session_state.items = []
 
-# ─────────────────────────────────────────────
-# UI STYLE
-# ─────────────────────────────────────────────
-st.markdown("""
-<style>
-#MainMenu, footer, header {visibility: hidden;}
+if "results" not in st.session_state:
+    st.session_state.results = None
 
-.block-container {
-    max-width: 480px;
-    margin: auto;
-    padding-top: 1.5rem;
-}
+# -----------------------------
+# UI HEADER
+# -----------------------------
+st.markdown("## 🏗️ ARLO Pricing Engine")
+st.caption("BOQ-Based Pricing. Margin Protected.")
 
-div.stButton > button {
-    border-radius: 10px;
-    height: 50px;
-    font-size: 16px;
-    font-weight: bold;
-}
-
-.result-card {
-    padding:15px;
-    border-radius:12px;
-    background:#111827;
-    border:1px solid #333;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# ─────────────────────────────────────────────
-# HEADER
-# ─────────────────────────────────────────────
-st.markdown("""
-<h2 style='text-align:center;'>🏗️ ARLO Pricing Engine</h2>
-<p style='text-align:center; color:#888;'>BOQ-Based Pricing. Margin Protected.</p>
-""", unsafe_allow_html=True)
-
-# ─────────────────────────────────────────────
-# PROJECT INPUT
-# ─────────────────────────────────────────────
 project_name = st.text_input("Project Name")
 
-# ─────────────────────────────────────────────
-# LINE ITEM ENGINE (LEVEL 3)
-# ─────────────────────────────────────────────
+# -----------------------------
+# BOQ SECTION
+# -----------------------------
 st.markdown("## 📦 Job Breakdown (BOQ)")
 
-colA, colB = st.columns(2)
+col1, col2 = st.columns(2)
 
-if colA.button("➕ Add Line Item"):
-    st.session_state["items"].append({
+if col1.button("➕ Add Line Item"):
+    st.session_state.items.append({
         "name": "",
         "type": "Mixed",
         "qty": 1.0,
         "rate": 0.0,
-        "labour_pct": 50,
-        "material_pct": 50,
-        "subcontract": 0.0,
-        "cost": 0.0
+        "labour_pct": 50
     })
 
-if colB.button("🗑 Clear"):
-    st.session_state["items"] = []
+if col2.button("🗑️ Clear"):
+    st.session_state.items = []
+    st.session_state.results = None
 
-line_total = 0
+total_direct_cost = 0
 
-for i, item in enumerate(st.session_state["items"]):
+for i, item in enumerate(st.session_state.items):
 
     st.markdown(f"### 🔹 Item {i+1}")
 
-    c1, c2 = st.columns(2)
-    name = c1.text_input(f"Item Name {i}", value=item.get("name", ""))
-    item_type = c2.selectbox(
-        f"Type {i}",
-        ["Labour", "Material", "Mixed", "Subcontract"],
-        index=["Labour", "Material", "Mixed", "Subcontract"].index(item.get("type", "Mixed"))
-    )
+    item["name"] = st.text_input(f"Item Name {i}", item["name"])
+    item["type"] = st.selectbox(f"Type {i}", ["Labour", "Material", "Mixed"], index=2)
+    item["qty"] = st.number_input(f"Qty {i}", value=item["qty"], step=1.0)
+    item["rate"] = st.number_input(f"Rate (R) {i}", value=item["rate"], step=100.0)
+    item["labour_pct"] = st.slider(f"Labour % {i}", 0, 100, item["labour_pct"])
 
-    c3, c4 = st.columns(2)
-    qty = c3.number_input(f"Qty {i}", value=item.get("qty", 1.0), min_value=0.0)
-    rate = c4.number_input(f"Rate (R) {i}", value=item.get("rate", 0.0), min_value=0.0)
+    cost = item["qty"] * item["rate"]
+    total_direct_cost += cost
 
-    base_cost = qty * rate
+    st.caption(f"💰 Cost: R{cost:,.0f}")
 
-    labour_pct = 0
-    material_pct = 0
-    subcontract_cost = 0
+# -----------------------------
+# TOTAL DIRECT COST
+# -----------------------------
+st.markdown(f"## 💰 Total Direct Cost: R{total_direct_cost:,.0f}")
 
-    if item_type == "Mixed":
-        c5, c6 = st.columns(2)
-        labour_pct = c5.slider(f"Labour % {i}", 0, 100, int(item.get("labour_pct", 50)))
-        material_pct = 100 - labour_pct
+# -----------------------------
+# PRICING INPUTS
+# -----------------------------
+overhead_pct = st.slider("Overhead %", 0, 100, 20)
+margin_pct = st.slider("Target Margin %", 0, 100, 30)
 
-    elif item_type == "Subcontract":
-        subcontract_cost = st.number_input(f"Subcontract Cost {i}", value=item.get("subcontract", 0.0))
-
-    labour_cost = base_cost * (labour_pct / 100)
-    material_cost = base_cost * (material_pct / 100)
-
-    total_item_cost = labour_cost + material_cost + subcontract_cost
-
-    st.caption(f"💰 Cost: R{total_item_cost:,.0f}")
-
-    # ⚠️ LOSS / LOW RATE WARNING
-    if rate < 50 and rate != 0:
-        st.warning("⚠️ This rate looks very low")
-
-    st.session_state["items"][i] = {
-        "name": name,
-        "type": item_type,
-        "qty": qty,
-        "rate": rate,
-        "labour_pct": labour_pct,
-        "material_pct": material_pct,
-        "subcontract": subcontract_cost,
-        "cost": total_item_cost
-    }
-
-    line_total += total_item_cost
-
-st.markdown(f"### 💰 Total Direct Cost: R{line_total:,.0f}")
-
-st.markdown("---")
-
-# ─────────────────────────────────────────────
-# PRICING CONTROLS
-# ─────────────────────────────────────────────
-overhead_pct = st.slider("Overhead %", 10, 30, 18)
-margin_pct = st.slider("Target Margin %", 20, 45, 30)
-
-# ─────────────────────────────────────────────
-# CALC ENGINE
-# ─────────────────────────────────────────────
-if st.button("💰 Generate Quote", use_container_width=True):
+# -----------------------------
+# CALCULATE BUTTON
+# -----------------------------
+if st.button("💰 Generate Quote"):
 
     try:
-        if line_total == 0:
-            st.warning("Add at least one line item")
+        if margin_pct >= 100:
+            st.error("Margin must be below 100%")
             st.stop()
 
-        direct_cost = line_total
-        overhead = direct_cost * (overhead_pct / 100)
-        total_cost = direct_cost + overhead
+        if total_direct_cost == 0:
+            st.warning("Add at least one item")
+            st.stop()
+
+        overhead = total_direct_cost * (overhead_pct / 100)
+        total_cost = total_direct_cost + overhead
 
         price = total_cost / (1 - margin_pct / 100)
         profit = price - total_cost
-        margin_actual = (profit / price) * 100
-        walkaway = total_cost / (1 - 0.20)
-        suggested = (price + walkaway) / 2
+        margin = (profit / price) * 100
 
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        ref = f"ARLO-{secrets.token_hex(3).upper()}"
+        walk_away = total_cost * 1.25
+        suggested = (price + walk_away) / 2
 
-        save_quote({
-            "timestamp": timestamp,
-            "project_name": project_name,
+        # SAVE TO SESSION
+        st.session_state.results = {
             "total_cost": total_cost,
             "price": price,
             "profit": profit,
-            "margin": margin_actual,
-            "walkaway": walkaway
-        })
+            "margin": margin,
+            "walk_away": walk_away,
+            "suggested": suggested
+        }
 
-        # RESULTS
-        st.markdown("## 📊 Results")
-
-        st.markdown(f"""
-        <div class="result-card">
-        <b>Total Cost:</b> R{total_cost:,.0f}<br><br>
-        <b>Target Price:</b> R{price:,.0f}<br><br>
-        <b style='color:#4ade80;'>Suggested:</b> R{suggested:,.0f}<br><br>
-        <b>Profit:</b> R{profit:,.0f}<br><br>
-        <b>Margin:</b> {margin_actual:.1f}%<br><br>
-        <b style='color:#ff4b4b;'>Walk-Away:</b> R{walkaway:,.0f}
-        </div>
-        """, unsafe_allow_html=True)
-
-        # BOQ DISPLAY
-        st.markdown("### 📋 BOQ Breakdown")
-
-        for item in st.session_state["items"]:
-            st.write(
-                f"{item['name']} — R{item['cost']:,.0f} "
-                f"({item['qty']} × {item['rate']})"
-            )
-
-        # DISCOUNT SIM
-        st.markdown("### 🔻 Discount Simulation")
-
-        discount = st.slider("Discount %", 0, 25, 0)
-
-        if discount > 0:
-            new_price = price * (1 - discount / 100)
-            new_profit = new_price - total_cost
-            new_margin = (new_profit / new_price) * 100
-
-            st.warning(f"""
-New Price: R{new_price:,.0f}
-Profit: R{new_profit:,.0f}
-Margin: {new_margin:.1f}%
-""")
-
-        # PDF
-        pdf = FPDF()
-        pdf.add_page()
-
-        pdf.set_font("Arial", "B", 16)
-        pdf.cell(200, 10, "ARLO QUOTATION", ln=1, align="C")
-
-        pdf.set_font("Arial", size=12)
-        pdf.cell(200, 8, f"Date: {timestamp}", ln=1)
-        pdf.cell(200, 8, f"Ref: {ref}", ln=1)
-        pdf.cell(200, 8, f"Project: {project_name}", ln=1)
-
-        pdf.ln(10)
-
-        for item in st.session_state["items"]:
-            pdf.cell(200, 8, f"{item['name']} - R{item['cost']:,.0f}", ln=1)
-
-        pdf.ln(5)
-        pdf.cell(200, 8, f"Total Price: R{price:,.0f}", ln=1)
-
-        pdf_output = pdf.output(dest="S")
-        pdf_bytes = pdf_output.encode("latin-1") if isinstance(pdf_output, str) else pdf_output
-
-        b64 = base64.b64encode(pdf_bytes).decode()
-
-        st.markdown(
-            f'<a href="data:application/pdf;base64,{b64}" download="ARLO_Quote_{ref}.pdf">📄 Download PDF</a>',
-            unsafe_allow_html=True
-        )
+        # SAVE TO DB
+        c.execute("""
+        INSERT INTO quotes (ts, project, total_cost, price, profit, margin)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            datetime.now().strftime("%Y-%m-%d %H:%M"),
+            project_name,
+            total_cost,
+            price,
+            profit,
+            margin
+        ))
+        conn.commit()
 
     except Exception as e:
-        st.error(str(e))
+        st.error(f"Error: {str(e)}")
 
-# ─────────────────────────────────────────────
-# HISTORY
-# ─────────────────────────────────────────────
-st.markdown("---")
-st.subheader("📊 Recent Quotes")
+# -----------------------------
+# RESULTS DISPLAY
+# -----------------------------
+if st.session_state.results:
 
-rows = get_recent_quotes()
+    r = st.session_state.results
 
-if not rows:
-    st.info("No quotes yet.")
-else:
-    for r in rows:
-        with st.expander(f"{r['timestamp'][:16]} | R{r['price']:,.0f}"):
-            st.caption(r.get("project_name", ""))
+    st.markdown("## 📊 Results")
 
-# ─────────────────────────────────────────────
+    st.success(f"""
+Total Cost: R{r['total_cost']:,.0f}
+
+Target Price: R{r['price']:,.0f}
+
+Suggested: R{r['suggested']:,.0f}
+
+Profit: R{r['profit']:,.0f}
+
+Margin: {r['margin']:.1f}%
+
+Walk-Away: R{r['walk_away']:,.0f}
+""")
+
+    # -------------------------
+    # DISCOUNT SIMULATION
+    # -------------------------
+    st.markdown("## 🔻 Discount Simulation")
+
+    discount_pct = st.slider("Discount %", 0, 25, 0)
+
+    if discount_pct > 0:
+        new_price = r["price"] * (1 - discount_pct / 100)
+        new_profit = new_price - r["total_cost"]
+        new_margin = (new_profit / new_price) * 100
+
+        st.warning(f"""
+After {discount_pct}% discount:
+
+New Price: R{new_price:,.0f}
+New Profit: R{new_profit:,.0f}
+New Margin: {new_margin:.1f}%
+""")
+
+    # -------------------------
+    # PDF EXPORT
+    # -------------------------
+    pdf = FPDF()
+    pdf.add_page()
+
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(200, 10, "ARLO PROJECT QUOTE", ln=1, align="C")
+
+    pdf.set_font("Arial", size=12)
+
+    ref = f"ARLO-{secrets.token_hex(3).upper()}"
+
+    pdf.cell(200, 8, f"Date: {datetime.now().strftime('%Y-%m-%d')}", ln=1)
+    pdf.cell(200, 8, f"Reference: {ref}", ln=1)
+    pdf.cell(200, 8, f"Project: {project_name}", ln=1)
+
+    pdf.ln(10)
+
+    pdf.cell(200, 8, f"Total Price: R{r['price']:,.0f}", ln=1)
+
+    pdf.ln(5)
+
+    pdf.multi_cell(0, 8, f"""
+Total Cost: R{r['total_cost']:,.0f}
+Suggested: R{r['suggested']:,.0f}
+Walk-Away: R{r['walk_away']:,.0f}
+
+Prepared by ARLO – The Profit Prophet
+""")
+
+    pdf_output = pdf.output(dest="S").encode("latin-1")
+    b64 = base64.b64encode(pdf_output).decode()
+
+    href = f'<a href="data:application/pdf;base64,{b64}" download="arlo_quote.pdf">📄 Download PDF</a>'
+    st.markdown(href, unsafe_allow_html=True)
+
+# -----------------------------
+# RECENT QUOTES
+# -----------------------------
+st.markdown("## 📊 Recent Quotes")
+
+df = pd.read_sql_query("SELECT * FROM quotes ORDER BY id DESC LIMIT 5", conn)
+
+for _, row in df.iterrows():
+    with st.expander(f"{row['ts']} | R{row['price']:,.0f}"):
+        st.write(f"Project: {row['project']}")
+        st.write(f"Profit: R{row['profit']:,.0f}")
+        st.write(f"Margin: {row['margin']:.1f}%")
+
+# -----------------------------
 # FOOTER
-# ─────────────────────────────────────────────
+# -----------------------------
 st.markdown("---")
 st.caption("📱 Add to Home Screen → Use like an app")
+st.caption("ARLO v1.2")
