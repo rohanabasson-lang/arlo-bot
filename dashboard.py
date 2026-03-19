@@ -178,18 +178,18 @@ def make_pdf_bytes(
     pdf.set_font("Arial", "B", 12)
     pdf.cell(190, 8, "BOQ Breakdown", ln=True)
 
-    pdf.set_font("Arial", size=10)  # smaller font helps long lines fit
+    pdf.set_font("Arial", size=10)
 
     for idx, item in enumerate(boq_items, start=1):
         name = item['name'] if item['name'] else f"Item {idx}"
         line = (
-            f"{idx}. {name} — "
+            f"{idx}. {name} - "   # plain ASCII hyphen → no Unicode crash
             f"Qty: {item['qty']:,.2f} | "
             f"Rate: R{item['rate']:,.0f} | "
             f"Subtotal: R{item['cost']:,.0f}"
         )
-        pdf.multi_cell(170, 6, line)   # narrower width + auto-wrap
-        pdf.ln(1)  # small gap between items
+        pdf.multi_cell(170, 6, line)
+        pdf.ln(1)
 
     pdf.ln(10)
     footer = (
