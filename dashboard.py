@@ -174,21 +174,28 @@ def make_pdf_bytes(
     safe_summary = summary_text.encode("latin-1", errors="ignore").decode("latin-1")
     pdf.multi_cell(180, 7, safe_summary)
 
-    pdf.ln(6)
+    pdf.ln(10)
     pdf.set_font("Arial", "B", 12)
     pdf.cell(190, 8, "BOQ Breakdown", ln=True)
-    pdf.set_font("Arial", size=11)
+    pdf.set_font("Arial", size=10)
 
     for idx, item in enumerate(boq_items, start=1):
-        name_part = item['name'] if item['name'] else f"Item {idx}"
-        line = (
-            f"{idx}. {name_part} | "
-            f"Qty: {item['qty']:,.2f} | "
+        name = item['name'] if item['name'] else f"Item {idx}"
+        
+        # Item name on its own line (bold)
+        pdf.set_font("Arial", "B", 10)
+        pdf.multi_cell(180, 6, f"{idx}. {name}")
+        
+        # Details on next line (indented)
+        pdf.set_font("Arial", size=10)
+        details = (
+            f"    Qty: {item['qty']:,.2f} | "
             f"Rate: R{item['rate']:,.0f} | "
             f"Subtotal: R{item['cost']:,.0f}"
         )
-        safe_line = line.encode("latin-1", errors="ignore").decode("latin-1")
-        pdf.multi_cell(180, 7, safe_line)
+        pdf.multi_cell(180, 6, details)
+        
+        pdf.ln(2)  # small spacing between items
 
     pdf.ln(10)
     footer = (
