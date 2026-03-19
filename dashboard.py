@@ -219,7 +219,7 @@ Total Cost: R{r['total_cost']:,.0f}
 Suggested: R{r['suggested']:,.0f}
 Walk-Away: R{r['walk_away']:,.0f}
 
-Prepared by ARLO – The Profit Prophet
+Prepared by ARLO - The Profit Prophet
 """)
 
     pdf_output = pdf.output(dest="S").encode("latin-1")
@@ -246,4 +246,4 @@ for _, row in df.iterrows():
 # -----------------------------
 st.markdown("---")
 st.caption("📱 Add to Home Screen → Use like an app")
-st.caption("ARLO - The Profit Prophet")
+st.caption("Prepared by ARLO - The Profit Prophet")
