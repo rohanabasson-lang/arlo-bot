@@ -14,7 +14,7 @@ init_db()
 st.set_page_config(page_title="ARLO Pricing Engine", layout="centered")
 
 # ─────────────────────────────────────────────
-# UI POLISH
+# UI STYLE
 # ─────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -24,7 +24,6 @@ header {visibility: hidden;}
 
 .block-container {
     padding-top: 1.5rem;
-    padding-bottom: 1rem;
     max-width: 480px;
     margin: auto;
 }
@@ -54,26 +53,69 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# INPUTS
+# BASIC INPUTS (V1)
 # ─────────────────────────────────────────────
 st.subheader("Job Costs")
 
 col1, col2 = st.columns(2)
 
-labour = col1.number_input("Labour (R)", min_value=0.0, step=1.0)
-materials = col1.number_input("Materials (R)", min_value=0.0, step=1.0)
-equipment = col2.number_input("Equipment / Hire (R)", min_value=0.0, step=1.0)
-other = col2.number_input("Transport / Other (R)", min_value=0.0, step=1.0)
+labour = col1.number_input("Labour (R)", 0.0)
+materials = col1.number_input("Materials (R)", 0.0)
+equipment = col2.number_input("Equipment / Hire (R)", 0.0)
+other = col2.number_input("Transport / Other (R)", 0.0)
 
 project_name = st.text_input("Project Name (optional)", "")
 
+# ─────────────────────────────────────────────
+# 🔥 LINE ITEM ENGINE (V2)
+# ─────────────────────────────────────────────
+st.markdown("## 📦 Detailed Job Breakdown (Optional)")
+
+if "items" not in st.session_state:
+    st.session_state.items = []
+
+colA, colB = st.columns(2)
+
+if colA.button("➕ Add Line Item"):
+    st.session_state.items.append({
+        "name": "",
+        "type": "Labour",
+        "cost": 0.0
+    })
+
+if colB.button("🗑 Clear Items"):
+    st.session_state.items = []
+
+line_total = 0
+
+for i, item in enumerate(st.session_state.items):
+    st.markdown(f"### Item {i+1}")
+
+    c1, c2 = st.columns(2)
+
+    name = c1.text_input(f"Name {i}", item["name"])
+    item_type = c2.selectbox(f"Type {i}", ["Labour", "Material", "Subcontract"])
+
+    cost = st.number_input(f"Cost {i}", value=item["cost"], min_value=0.0)
+
+    st.session_state.items[i]["name"] = name
+    st.session_state.items[i]["type"] = item_type
+    st.session_state.items[i]["cost"] = cost
+
+    line_total += cost
+
+st.markdown(f"### 💰 Line Item Total: R{line_total:,.0f}")
+
 st.markdown("---")
 
+# ─────────────────────────────────────────────
+# PRICING CONTROLS
+# ─────────────────────────────────────────────
 overhead_pct = st.slider("Overhead %", 10, 30, 18)
 margin_pct = st.slider("Target Margin %", 20, 45, 30)
 
 # ─────────────────────────────────────────────
-# CALC
+# CALCULATION
 # ─────────────────────────────────────────────
 if st.button("💰 Generate Client-Ready Quote", use_container_width=True):
 
@@ -85,12 +127,12 @@ if st.button("💰 Generate Client-Ready Quote", use_container_width=True):
         if margin_pct < 10:
             st.warning("Margin below 10% is very aggressive")
 
-        if all(v == 0 for v in [labour, materials, equipment, other]):
+        if all(v == 0 for v in [labour, materials, equipment, other, line_total]):
             st.warning("Enter at least one cost value")
             st.stop()
 
-        # CORE CALC
-        direct_cost = labour + materials + equipment + other
+        # 🔥 CORE ENGINE
+        direct_cost = labour + materials + equipment + other + line_total
         overhead = direct_cost * (overhead_pct / 100)
         total_cost = direct_cost + overhead
 
@@ -99,7 +141,6 @@ if st.button("💰 Generate Client-Ready Quote", use_container_width=True):
         margin_actual = (profit / price) * 100
         walkaway = total_cost / (1 - 0.20)
 
-        # 🔥 SUGGESTED PRICE (SMART POSITIONING)
         suggested_price = (price + walkaway) / 2
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -113,8 +154,7 @@ if st.button("💰 Generate Client-Ready Quote", use_container_width=True):
             "materials": materials,
             "equipment": equipment,
             "other": other,
-            "overhead_pct": overhead_pct,
-            "margin_target": margin_pct,
+            "line_total": line_total,
             "total_cost": total_cost,
             "price": price,
             "profit": profit,
@@ -127,7 +167,7 @@ if st.button("💰 Generate Client-Ready Quote", use_container_width=True):
 
         st.markdown(f"""
         <div class="result-card">
-        <b>Cost:</b> R{total_cost:,.0f}<br><br>
+        <b>Total Cost:</b> R{total_cost:,.0f}<br><br>
         <b>Target Price:</b> R{price:,.0f}<br><br>
         <b style='color:#4ade80;'>💡 Suggested Price:</b> R{suggested_price:,.0f}<br><br>
         <b>Profit:</b> R{profit:,.0f}<br><br>
@@ -138,17 +178,11 @@ if st.button("💰 Generate Client-Ready Quote", use_container_width=True):
 
         st.error(f"🚫 NEVER go below: R{walkaway:,.0f}")
 
-        if margin_actual < 25:
-            st.error("⚠️ High risk — margin too low")
-        elif margin_actual < 30:
-            st.warning("Margin acceptable, but could improve")
-        else:
-            st.success("Strong margin")
-
-        st.info(
-            f"Typical contractors net ~3–5%. "
-            f"You are positioned at ~{margin_actual*0.4:.1f}%–{margin_actual*0.6:.1f}% net."
-        )
+        # ───────── LINE ITEM DISPLAY ─────────
+        if line_total > 0:
+            st.markdown("### 📋 Line Item Breakdown")
+            for item in st.session_state.items:
+                st.caption(f"{item['name']} ({item['type']}) — R{item['cost']:,.0f}")
 
         # ───────── DISCOUNT SIM ─────────
         st.markdown("### 🔻 Discount Simulation")
@@ -162,11 +196,9 @@ if st.button("💰 Generate Client-Ready Quote", use_container_width=True):
 
             st.warning(f"""
 After {discount_pct}% discount:
-- New Price:     R{new_price:,.0f}
-- New Profit:    R{new_profit:,.0f}
-- New Margin:    {new_margin:.1f}%
-
-⚠️ This is how profit leaks during negotiation.
+- New Price: R{new_price:,.0f}
+- New Profit: R{new_profit:,.0f}
+- New Margin: {new_margin:.1f}%
 """)
 
         # ───────── PDF ─────────
@@ -194,8 +226,19 @@ Labour: R{labour:,.0f}
 Materials: R{materials:,.0f}
 Equipment: R{equipment:,.0f}
 Other: R{other:,.0f}
+Line Items: R{line_total:,.0f}
 Overhead ({overhead_pct}%): R{overhead:,.0f}
+""")
 
+        if line_total > 0:
+            pdf.ln(5)
+            pdf.cell(200, 8, "Detailed Breakdown:", ln=1)
+
+            for item in st.session_state.items:
+                pdf.cell(200, 8, f"{item['name']} - R{item['cost']:,.0f}", ln=1)
+
+        pdf.ln(5)
+        pdf.multi_cell(0, 8, """
 Valid for 14 days.
 
 Prepared by ARLO – The Profit Prophet
@@ -232,4 +275,3 @@ else:
 # ───────── FOOTER ─────────
 st.markdown("---")
 st.caption("📱 Add to Home Screen → Use like an app")
-st.caption("v1.2 – Early Access")
