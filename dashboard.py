@@ -34,16 +34,16 @@ CREATE TABLE IF NOT EXISTS quotes (
 conn.commit()
 
 # -----------------------------
-# SESSION STATE INIT
+# SESSION STATE (FIXED)
 # -----------------------------
-if "items" not in st.session_state:
-    st.session_state.items = []
+if "boq_items" not in st.session_state:
+    st.session_state.boq_items = []
 
 if "results" not in st.session_state:
     st.session_state.results = None
 
 # -----------------------------
-# UI HEADER
+# HEADER
 # -----------------------------
 st.markdown("## 🏗️ ARLO Pricing Engine")
 st.caption("BOQ-Based Pricing. Margin Protected.")
@@ -58,7 +58,7 @@ st.markdown("## 📦 Job Breakdown (BOQ)")
 col1, col2 = st.columns(2)
 
 if col1.button("➕ Add Line Item"):
-    st.session_state.items.append({
+    st.session_state.boq_items.append({
         "name": "",
         "type": "Mixed",
         "qty": 1.0,
@@ -67,12 +67,12 @@ if col1.button("➕ Add Line Item"):
     })
 
 if col2.button("🗑️ Clear"):
-    st.session_state.items = []
+    st.session_state.boq_items = []
     st.session_state.results = None
 
 total_direct_cost = 0
 
-for i, item in enumerate(st.session_state.items):
+for i, item in enumerate(st.session_state.boq_items):
 
     st.markdown(f"### 🔹 Item {i+1}")
 
@@ -88,7 +88,7 @@ for i, item in enumerate(st.session_state.items):
     st.caption(f"💰 Cost: R{cost:,.0f}")
 
 # -----------------------------
-# TOTAL DIRECT COST
+# TOTAL COST
 # -----------------------------
 st.markdown(f"## 💰 Total Direct Cost: R{total_direct_cost:,.0f}")
 
@@ -99,7 +99,7 @@ overhead_pct = st.slider("Overhead %", 0, 100, 20)
 margin_pct = st.slider("Target Margin %", 0, 100, 30)
 
 # -----------------------------
-# CALCULATE BUTTON
+# CALC BUTTON
 # -----------------------------
 if st.button("💰 Generate Quote"):
 
@@ -117,12 +117,11 @@ if st.button("💰 Generate Quote"):
 
         price = total_cost / (1 - margin_pct / 100)
         profit = price - total_cost
-        margin = (profit / price) * 100
+        margin = (profit / price) * 100 if price > 0 else 0
 
         walk_away = total_cost * 1.25
         suggested = (price + walk_away) / 2
 
-        # SAVE TO SESSION
         st.session_state.results = {
             "total_cost": total_cost,
             "price": price,
@@ -147,10 +146,10 @@ if st.button("💰 Generate Quote"):
         conn.commit()
 
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        st.error(f"Calculation error: {str(e)}")
 
 # -----------------------------
-# RESULTS DISPLAY
+# RESULTS
 # -----------------------------
 if st.session_state.results:
 
@@ -173,7 +172,7 @@ Walk-Away: R{r['walk_away']:,.0f}
 """)
 
     # -------------------------
-    # DISCOUNT SIMULATION
+    # DISCOUNT SIM (FIXED)
     # -------------------------
     st.markdown("## 🔻 Discount Simulation")
 
@@ -182,7 +181,7 @@ Walk-Away: R{r['walk_away']:,.0f}
     if discount_pct > 0:
         new_price = r["price"] * (1 - discount_pct / 100)
         new_profit = new_price - r["total_cost"]
-        new_margin = (new_profit / new_price) * 100
+        new_margin = (new_profit / new_price) * 100 if new_price > 0 else 0
 
         st.warning(f"""
 After {discount_pct}% discount:
@@ -207,7 +206,7 @@ New Margin: {new_margin:.1f}%
 
     pdf.cell(200, 8, f"Date: {datetime.now().strftime('%Y-%m-%d')}", ln=1)
     pdf.cell(200, 8, f"Reference: {ref}", ln=1)
-    pdf.cell(200, 8, f"Project: {project_name}", ln=1)
+    pdf.cell(200, 8, f"Project: {project_name or 'General Works'}", ln=1)
 
     pdf.ln(10)
 
@@ -247,4 +246,4 @@ for _, row in df.iterrows():
 # -----------------------------
 st.markdown("---")
 st.caption("📱 Add to Home Screen → Use like an app")
-st.caption("ARLO v1.2")
+st.caption("ARLO - The Profit Prophet")
