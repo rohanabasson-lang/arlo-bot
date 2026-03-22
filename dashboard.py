@@ -193,8 +193,6 @@ def make_pdf_bytes(user_name, client_name, client_phone, project_name, final_pri
     vat = final_price * 0.15
     total_vat = final_price * 1.15
 
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, f"Quote {quote_number or 'DRAFT'} - {price_type}", ln=True, align="R")
     pdf.ln(4)
 
     pdf.set_font("Arial", "B", 11)
@@ -210,9 +208,10 @@ def make_pdf_bytes(user_name, client_name, client_phone, project_name, final_pri
     pdf.cell(0, 8, f"From: {user_name}", border=1, ln=1)
 
     pdf.ln(6)
+
     pdf_section_title(pdf, "Price Summary")
     pdf.set_font("Arial", size=10)
-    pdf.cell(120, 8, f"Selected Price ({price_type}) excl. VAT", border=1, ln=0)
+    pdf.cell(120, 8, "Selected Price excl. VAT", border=1, ln=0)
     pdf.cell(0, 8, f"R{final_price:,.0f}", border=1, ln=1)
     pdf.cell(120, 8, "VAT @ 15%", border=1, ln=0)
     pdf.cell(0, 8, f"R{vat:,.0f}", border=1, ln=1)
@@ -221,6 +220,7 @@ def make_pdf_bytes(user_name, client_name, client_phone, project_name, final_pri
     pdf.cell(0, 9, f"R{total_vat:,.0f}", border=1, ln=1)
 
     pdf.ln(6)
+
     pdf_section_title(pdf, "Project Breakdown")
     pdf.set_font("Arial", "B", 10)
     pdf.set_fill_color(235, 240, 248)
@@ -266,7 +266,7 @@ def make_pdf_bytes(user_name, client_name, client_phone, project_name, final_pri
         pdf_bytes = bytes(pdf_bytes)
     return pdf_bytes
 
-# Session state
+# Session state initialization
 for key, default in [("boq", []), ("last_saved_key", None), ("user", None), ("project_name", "General Scope"), ("client_name", ""), ("client_phone", ""), ("selected_price_type", None)]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -290,7 +290,7 @@ user_phone = st.session_state.user
 user_name = BUSINESS_MAP.get(user_phone, user_phone)
 is_admin = user_phone in ADMIN_NUMBERS
 
-# Usage
+# Usage tracking
 usage, reset_date, quote_counter = get_or_init_user(user_phone)
 
 if not is_admin:
@@ -474,7 +474,7 @@ with act2:
     if save_disabled:
         st.button("📄 Download Quotation", disabled=True, use_container_width=True)
     else:
-        safe_num = quote_num if 'quote_num' in locals() else "ARLO-DRAFT"
+        safe_num = quote_num if 'quote_num' in locals() else "ARLO"
         pdf_data = make_pdf_bytes(
             user_name=user_name,
             client_name=st.session_state.client_name,
@@ -489,9 +489,9 @@ with act2:
         st.download_button(
             "📄 Download Quotation",
             data=pdf_data,
-            file_name=f"{safe_num}_{selected_type.replace(' ', '-')}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            file_name=f"ARLO_Quote_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
             mime="application/pdf",
             use_container_width=True
         )
 
-st.caption("ARLO • Built for Contractors")
+st.caption("ARLO • SA contractors tool")
