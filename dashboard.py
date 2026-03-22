@@ -194,7 +194,7 @@ def make_pdf_bytes(user_name, client_name, client_phone, project_name, final_pri
     total_vat = final_price * 1.15
 
     pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, f"Quote {quote_number or 'DRAFT'} – {price_type}", ln=True, align="R")
+    pdf.cell(0, 10, f"Quote {quote_number or 'DRAFT'} - {price_type}", ln=True, align="R")
     pdf.ln(4)
 
     pdf.set_font("Arial", "B", 11)
@@ -260,7 +260,7 @@ def make_pdf_bytes(user_name, client_name, client_phone, project_name, final_pri
         pdf_bytes = bytes(pdf_bytes)
     return pdf_bytes
 
-# Session state init
+# Session state
 for key, default in [("boq", []), ("last_saved_key", None), ("user", None), ("project_name", "General Scope"), ("client_name", ""), ("client_phone", ""), ("selected_price_type", None)]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -284,7 +284,7 @@ user_phone = st.session_state.user
 user_name = BUSINESS_MAP.get(user_phone, user_phone)
 is_admin = user_phone in ADMIN_NUMBERS
 
-# Usage tracking
+# Usage
 usage, reset_date, quote_counter = get_or_init_user(user_phone)
 
 if not is_admin:
@@ -302,7 +302,7 @@ if not is_admin:
         st.warning(f"Only {remaining} quotes left this month.")
 
 st.title("🏗️ ARLO Pricing Assistant")
-st.caption("BY THE PROFIT PROPHET")
+st.caption("Built for SA contractors")
 
 st.sidebar.markdown(f"**Logged in as**  \n{user_name}")
 st.sidebar.markdown(f"Phone: `{user_phone}`")
@@ -398,28 +398,52 @@ margin_s = (profit_s / suggested_price * 100) if suggested_price > 0 else 0
 profit_w = walkaway_price - total_cost
 margin_w = (profit_w / walkaway_price * 100) if walkaway_price > 0 else 0
 
-st.subheader("Final Price Selection (required)")
-price_options = {
-    "Target Price": (target_price, profit_t, margin_t),
-    "Suggested Price": (suggested_price, profit_s, margin_s),
-    "Walk-away Price": (walkaway_price, profit_w, margin_w)
-}
+# Price tiles
+st.subheader("Final Price Options")
+t1, t2, t3 = st.columns(3)
 
+with t1:
+    st.metric(
+        label="Target Price",
+        value=f"R{target_price:,.0f}",
+        delta=f"{margin_t:.1f}% margin | R{profit_t:,.0f} profit"
+    )
+
+with t2:
+    st.metric(
+        label="Suggested Price",
+        value=f"R{suggested_price:,.0f}",
+        delta=f"{margin_s:.1f}% margin | R{profit_s:,.0f} profit"
+    )
+
+with t3:
+    st.metric(
+        label="Walk-away Price",
+        value=f"R{walkaway_price:,.0f}",
+        delta=f"{margin_w:.1f}% margin | R{profit_w:,.0f} profit"
+    )
+
+st.subheader("Select Price to Quote")
 selected_type = st.radio(
-    "Choose the price to quote:",
-    options=list(price_options.keys()),
+    "Choose which price to use for this quote:",
+    options=["Target Price", "Suggested Price", "Walk-away Price"],
     index=None,
-    horizontal=True
+    horizontal=True,
+    key="price_radio"
 )
 
-st.session_state.selected_price_type = selected_type
-
-if selected_type:
-    final_price, final_profit, final_margin = price_options[selected_type]
-    st.success(f"Selected: **{selected_type}** = R{final_price:,.0f}  \nProfit: R{final_profit:,.0f} ({final_margin:.1f}%)")
-else:
-    st.warning("Please select one of the final prices above to save or download the quote.")
+if not selected_type:
+    st.warning("Please select one of the prices above to save or download the quote.")
     st.stop()
+
+if selected_type == "Target Price":
+    final_price, final_profit, final_margin = target_price, profit_t, margin_t
+elif selected_type == "Suggested Price":
+    final_price, final_profit, final_margin = suggested_price, profit_s, margin_s
+else:
+    final_price, final_profit, final_margin = walkaway_price, profit_w, margin_w
+
+st.success(f"Selected **{selected_type}**: R{final_price:,.0f} (Profit R{final_profit:,.0f} | {final_margin:.1f}%)")
 
 # Save & Download
 act1, act2 = st.columns(2)
@@ -446,8 +470,7 @@ with act1:
         if not is_admin:
             increment_usage(user_phone)
 
-        st.session_state.last_saved_key = (user_phone, st.session_state.client_name, st.session_state.project_name, round(final_price, 2))
-        st.success(f"✅ Quote **{quote_num}** saved ({selected_type})!")
+        st.success(f"Quote **{quote_num}** saved ({selected_type})!")
         st.balloons()
         st.rerun()
 
@@ -475,4 +498,4 @@ with act2:
             use_container_width=True
         )
 
-st.caption("ARLO v2.4 • Target / Suggested / Walk-away required • SA contractors tool")
+st.caption("ARLO • SA contractors tool")
