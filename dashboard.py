@@ -185,11 +185,10 @@ def make_pdf_bytes(
     pdf.cell(190, 8, "BOQ Breakdown", ln=True)
 
     pdf.set_font("Arial", size=10)
-
     for idx, item in enumerate(boq_items, start=1):
         name = item['name'] if item['name'] else f"Item {idx}"
         line = (
-            f"{idx}. {name} - "   # plain ASCII hyphen → no Unicode crash
+            f"{idx}. {name} - "
             f"Qty: {item['qty']:,.2f} | "
             f"Rate: R{item['rate']:,.0f} | "
             f"Subtotal: R{item['cost']:,.0f}"
@@ -197,7 +196,28 @@ def make_pdf_bytes(
         pdf.multi_cell(170, 6, line)
         pdf.ln(1)
 
+    # ───────────────────────────────────────────────
+    # NEW: Pricing Build-Up (makes numbers add up)
+    # ───────────────────────────────────────────────
+    pdf.ln(8)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(190, 8, "Pricing Build-Up", ln=True)
+
+    pdf.set_font("Arial", size=11)
+    build_up_text = (
+        f"Total Direct Costs (from BOQ):          R{total_direct_cost:,.0f}\n"
+        f"Overhead ({overhead_pct:.1f}%):                  R{overhead_amount:,.0f}\n"
+        f"───────────────────────────────────────\n"
+        f"Total Cost:                               R{total_cost:,.0f}\n"
+        f"Profit / Margin ({margin:.1f}%):           R{profit:,.0f}\n"
+        f"───────────────────────────────────────\n"
+        f"Total Project Price (excl. VAT):    **R{price:,.0f}**"
+    )
+    safe_build = build_up_text.encode("latin-1", errors="ignore").decode("latin-1")
+    pdf.multi_cell(180, 7, safe_build)
+
     pdf.ln(10)
+    pdf.set_font("Arial", size=10)
     footer = (
         "Prepared by ARLO - The Profit Prophet\n\n"
         "Payment Terms: 50% deposit on acceptance, balance on practical completion.\n"
@@ -289,33 +309,31 @@ for i, item in enumerate(st.session_state.boq):
     with st.expander(f"Item {i+1}", expanded=True):
         col1, col2, col3 = st.columns(3)
 
-        item["name"] = col1.text_input("Item", value=item["name"], key=f"name_{i}")
-        item["qty"] = col2.number_input("Qty", min_value=0.0, value=float(item["qty"]), step=1.0, key=f"qty_{i}")
-        item["rate"] = col3.number_input("Rate", min_value=0.0, value=float(item["rate"]), step=100.0, key=f"rate_{i}")
+        item["name"]   = col1.text_input(  "Item",  value=item["name"],   key=f"name_{i}")
+        item["qty"]    = col2.number_input("Qty",   min_value=0.0, value=float(item["qty"]),  step=0.1,  key=f"qty_{i}")
+        item["rate"]   = col3.number_input("Rate",  min_value=0.0, value=float(item["rate"]), step=10.0, key=f"rate_{i}")
 
         item["labour_pct"] = st.slider("Labour %", 0, 100, int(item["labour_pct"]), key=f"lab_{i}")
 
         cost = float(item["qty"]) * float(item["rate"])
-        labour_cost = cost * (float(item["labour_pct"]) / 100)
+        labour_cost   = cost * (item["labour_pct"] / 100)
         material_cost = cost - labour_cost
 
         total_direct_cost += cost
-        labour_portion += labour_cost
-        material_portion += material_cost
+        labour_portion    += labour_cost
+        material_portion  += material_cost
 
         boq_snapshot.append({
             "name": item["name"] if item["name"] else f"Item {i+1}",
             "qty": float(item["qty"]),
             "rate": float(item["rate"]),
             "cost": cost,
-            "labour_cost": labour_cost,
-            "material_cost": material_cost
         })
 
         m1, m2, m3 = st.columns(3)
-        m1.metric("Cost", f"R{cost:,.0f}")
-        m2.metric("Labour", f"R{labour_cost:,.0f}")
-        m3.metric("Material", f"R{material_cost:,.0f}")
+        m1.metric("Cost",    f"R{cost:,.0f}")
+        m2.metric("Labour",  f"R{labour_cost:,.0f}")
+        m3.metric("Material",f"R{material_cost:,.0f}")
 
         if st.button("🗑 Delete", key=f"del_{i}"):
             st.session_state.boq.pop(i)
@@ -329,9 +347,15 @@ st.markdown("---")
 st.subheader("⚙️ Pricing Controls")
 ctrl1, ctrl2 = st.columns(2)
 with ctrl1:
-    overhead_pct = st.slider("Overhead %", 0, 100, 20)
+    overhead_pct = st.number_input(
+        "Overhead %", min_value=0.0, max_value=100.0,
+        value=20.0, step=0.5, format="%.1f"
+    )
 with ctrl2:
-    margin_pct = st.slider("Target Margin %", 1, 99, 30)
+    margin_pct = st.number_input(
+        "Target Margin %", min_value=1.0, max_value=99.0,
+        value=30.0, step=0.5, format="%.1f"
+    )
 
 if total_direct_cost <= 0:
     st.warning("Enter at least one cost item to generate pricing.")
@@ -340,17 +364,13 @@ if total_direct_cost <= 0:
 # =========================================================
 # CALCULATIONS
 # =========================================================
-try:
-    overhead_amount = total_direct_cost * (overhead_pct / 100)
-    total_cost = total_direct_cost + overhead_amount
-    price = total_cost / (1 - margin_pct / 100)
-    suggested = price * 0.95
-    profit = price - total_cost
-    margin = (profit / price) * 100 if price > 0 else 0
-    walk_away = total_cost * 1.25
-except Exception as e:
-    st.error(f"Calculation error: {e}")
-    st.stop()
+overhead_amount = total_direct_cost * (overhead_pct / 100)
+total_cost = total_direct_cost + overhead_amount
+price   = total_cost / (1 - margin_pct / 100)
+suggested = price * 0.95
+profit  = price - total_cost
+margin  = (profit / price) * 100 if price > 0 else 0
+walk_away = total_cost * 1.25
 
 # =========================================================
 # RESULTS
@@ -359,18 +379,18 @@ st.subheader("📊 Results")
 
 r1, r2, r3 = st.columns(3)
 r1.metric("Total Direct Cost", f"R{total_direct_cost:,.0f}")
-r2.metric("Labour Portion", f"R{labour_portion:,.0f}")
-r3.metric("Material Portion", f"R{material_portion:,.0f}")
+r2.metric("Labour Portion",    f"R{labour_portion:,.0f}")
+r3.metric("Material Portion",  f"R{material_portion:,.0f}")
 
 r4, r5, r6 = st.columns(3)
-r4.metric("Overhead", f"R{overhead_amount:,.0f}")
-r5.metric("Total Cost", f"R{total_cost:,.0f}")
-r6.metric("Profit", f"R{profit:,.0f}")
+r4.metric("Overhead",    f"R{overhead_amount:,.0f}")
+r5.metric("Total Cost",  f"R{total_cost:,.0f}")
+r6.metric("Profit",      f"R{profit:,.0f}")
 
 r7, r8, r9 = st.columns(3)
 r7.metric("Target Price", f"R{price:,.0f}")
-r8.metric("Suggested", f"R{suggested:,.0f}")
-r9.metric("Walk-Away", f"R{walk_away:,.0f}")
+r8.metric("Suggested",    f"R{suggested:,.0f}")
+r9.metric("Walk-Away",    f"R{walk_away:,.0f}")
 
 st.metric("Margin", f"{margin:.1f}%")
 
@@ -458,8 +478,8 @@ if discount > 0:
 
     st.warning(
         f"After {discount}% discount:\n\n"
-        f"Price: R{new_price:,.0f}\n\n"
-        f"Profit: R{new_profit:,.0f}\n\n"
+        f"Price: R{new_price:,.0f}\n"
+        f"Profit: R{new_profit:,.0f}\n"
         f"Margin: {new_margin:.1f}%"
     )
 
@@ -491,4 +511,4 @@ else:
 # =========================================================
 st.markdown("---")
 st.caption("📱 Tip: Add to Home Screen → Use like an app")
-st.caption("ARLO v1.0 MVP")
+st.caption("ARLO v1.1 • Numbers add up in PDF • Precise % controls")
