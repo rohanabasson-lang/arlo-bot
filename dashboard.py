@@ -225,33 +225,39 @@ def make_pdf_bytes(user_name, client_name, client_phone, project_name, final_pri
     pdf.set_font("Arial", "B", 10)
     pdf.set_fill_color(235, 240, 248)
     pdf.cell(12, 8, "#", border=1, align="C", fill=True)
-    pdf.cell(88, 8, "Description", border=1, fill=True)
-    pdf.cell(25, 8, "Qty", border=1, align="C", fill=True)
-    pdf.cell(30, 8, "Rate", border=1, align="R", fill=True)
+    pdf.cell(70, 8, "Description", border=1, fill=True)
+    pdf.cell(20, 8, "Qty", border=1, align="C", fill=True)
+    pdf.cell(25, 8, "Rate", border=1, align="R", fill=True)
+    pdf.cell(30, 8, "Labour", border=1, align="R", fill=True)
+    pdf.cell(30, 8, "Material/Other", border=1, align="R", fill=True)
     pdf.cell(35, 8, "Subtotal", border=1, align="R", ln=1, fill=True)
 
     pdf.set_font("Arial", size=9)
     for idx, item in enumerate(boq_items, 1):
         name = safe_text(item.get("name") or f"Line {idx}")
+        qty = item.get('qty', 0)
+        rate = item.get('rate', 0)
+        labour_pct = item.get('labour_pct', 50)
+        cost = qty * rate
+        labour = cost * (labour_pct / 100)
+        material = cost - labour
+
         row_y = pdf.get_y()
         pdf.cell(12, 8, str(idx), border=1, align="C")
         x = pdf.get_x()
-        pdf.multi_cell(88, 8, name, border=1)
+        pdf.multi_cell(70, 8, name, border=1)
         h = max(pdf.get_y() - row_y, 8)
-        pdf.set_xy(x + 88, row_y)
-        pdf.cell(25, h, f"{item.get('qty', 0):,.2f}", border=1, align="C")
-        pdf.cell(30, h, f"R{item.get('rate', 0):,.0f}", border=1, align="R")
-        pdf.cell(35, h, f"R{item.get('cost', 0):,.0f}", border=1, align="R", ln=1)
+        pdf.set_xy(x + 70, row_y)
+        pdf.cell(20, h, f"{qty:,.2f}", border=1, align="C")
+        pdf.cell(25, h, f"R{rate:,.0f}", border=1, align="R")
+        pdf.cell(30, h, f"R{labour:,.0f}", border=1, align="R")
+        pdf.cell(30, h, f"R{material:,.0f}", border=1, align="R")
+        pdf.cell(35, h, f"R{cost:,.0f}", border=1, align="R", ln=1)
 
     pdf.ln(6)
     pdf_section_title(pdf, "Terms & Notes")
     pdf.set_font("Arial", size=9)
-    pdf.multi_cell(0, 6, "Payment Terms: 50% deposit, balance on completion.\nInclusions: As per breakdown.\nExclusions: Variations.\nValid 30 days.")
-
-    if is_admin:
-        pdf.ln(4)
-        pdf_section_title(pdf, "Internal Details (Admin Only)")
-        pdf.multi_cell(0, 6, "(Hidden from client)")
+    pdf.multi_cell(0, 6, "Payment Terms: 50% deposit, balance on completion.\nInclusions: As per breakdown.\nExclusions: Variations, additional work, unforeseen conditions.\nAll prices exclude VAT unless stated otherwise.\nQuote valid for 30 days from date of issue.")
 
     pdf_bytes = pdf.output(dest="S")
     if isinstance(pdf_bytes, str):
@@ -357,6 +363,8 @@ for i, item in enumerate(st.session_state.boq):
             "qty": float(item["qty"]),
             "rate": float(item["rate"]),
             "labour_pct": item["labour_pct"],
+            "labour": labour,
+            "material": material,
             "cost": cost
         })
 
@@ -403,25 +411,13 @@ st.subheader("Final Price Options")
 t1, t2, t3 = st.columns(3)
 
 with t1:
-    st.metric(
-        label="Target Price",
-        value=f"R{target_price:,.0f}",
-        delta=f"{margin_t:.1f}% margin | R{profit_t:,.0f} profit"
-    )
+    st.metric("Target Price", f"R{target_price:,.0f}", f"{margin_t:.1f}% margin | R{profit_t:,.0f} profit")
 
 with t2:
-    st.metric(
-        label="Suggested Price",
-        value=f"R{suggested_price:,.0f}",
-        delta=f"{margin_s:.1f}% margin | R{profit_s:,.0f} profit"
-    )
+    st.metric("Suggested Price", f"R{suggested_price:,.0f}", f"{margin_s:.1f}% margin | R{profit_s:,.0f} profit")
 
 with t3:
-    st.metric(
-        label="Walk-away Price",
-        value=f"R{walkaway_price:,.0f}",
-        delta=f"{margin_w:.1f}% margin | R{profit_w:,.0f} profit"
-    )
+    st.metric("Walk-away Price", f"R{walkaway_price:,.0f}", f"{margin_w:.1f}% margin | R{profit_w:,.0f} profit")
 
 st.subheader("Select Price to Quote")
 selected_type = st.radio(
@@ -498,4 +494,4 @@ with act2:
             use_container_width=True
         )
 
-st.caption("ARLO • SA contractors tool")
+st.caption("ARLO • Built for Contractors")
