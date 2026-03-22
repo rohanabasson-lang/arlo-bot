@@ -45,6 +45,8 @@ AUTHORIZED_USERS = {
     "0718357947": "Champion Renovations"
 }
 
+BUSINESS_MAP = AUTHORIZED_USERS
+
 st.markdown("""
 <style>
 .block-container {padding-top: 1.5rem; padding-bottom: 2rem; max-width: 1100px;}
@@ -300,7 +302,7 @@ if not is_admin:
         st.warning(f"Only {remaining} quotes left this month.")
 
 st.title("🏗️ ARLO Pricing Assistant")
-st.caption("v2.4 • Target / Suggested / Walk-away selection • Johannesburg-built")
+st.caption("BY THE PROFIT PROPHET")
 
 st.sidebar.markdown(f"**Logged in as**  \n{user_name}")
 st.sidebar.markdown(f"Phone: `{user_phone}`")
@@ -406,7 +408,7 @@ price_options = {
 selected_type = st.radio(
     "Choose the price to quote:",
     options=list(price_options.keys()),
-    index=None,  # no default selection
+    index=None,
     horizontal=True
 )
 
@@ -472,7 +474,5 @@ with act2:
             mime="application/pdf",
             use_container_width=True
         )
-
-# ... (you can keep discount simulator and history sections as before)
 
 st.caption("ARLO v2.4 • Target / Suggested / Walk-away required • SA contractors tool")
