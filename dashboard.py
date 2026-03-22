@@ -8,12 +8,13 @@ from fpdf import FPDF
 # CONFIG
 # =========================================================
 st.set_page_config(
-    page_title="ARLO Pricing Engine",
+    page_title="ARLO Pricing Assistant",
     page_icon="🏗️",
     layout="wide"
 )
 
 DB_PATH = "arlo.db"
+USAGE_LIMIT = 15
 
 ADMIN_NUMBERS = ["0659994443", "0736826931"]
 
@@ -50,6 +51,8 @@ AUTHORIZED_USERS = {
     "0718357947": "Champion Renovations"
 }
 
+BUSINESS_MAP = AUTHORIZED_USERS
+
 # =========================================================
 # STYLING
 # =========================================================
@@ -62,6 +65,12 @@ st.markdown(
         max-width: 1100px;
     }
     .stMetric {
+        background: #0f172a;
+        border: 1px solid #1e293b;
+        padding: 14px;
+        border-radius: 14px;
+    }
+    div[data-testid="stMetric"] {
         background: #0f172a;
         border: 1px solid #1e293b;
         padding: 14px;
@@ -99,6 +108,14 @@ CREATE TABLE IF NOT EXISTS quotes (
     timestamp TEXT
 )
 """)
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS usage_tracking (
+    user_phone TEXT PRIMARY KEY,
+    quote_count INTEGER DEFAULT 0
+)
+""")
+
 conn.commit()
 
 # =========================================================
@@ -115,6 +132,7 @@ def save_quote(data: tuple) -> None:
     """, data)
     conn.commit()
 
+
 def get_user_quotes(phone: str) -> pd.DataFrame:
     return pd.read_sql_query(
         "SELECT * FROM quotes WHERE user_phone=? ORDER BY id DESC",
@@ -122,11 +140,70 @@ def get_user_quotes(phone: str) -> pd.DataFrame:
         params=(phone,)
     )
 
+
 def get_all_quotes() -> pd.DataFrame:
     return pd.read_sql_query(
         "SELECT * FROM quotes ORDER BY id DESC",
         conn
     )
+
+
+def safe_text(text) -> str:
+    replacements = {
+        "—": "-",
+        "–": "-",
+        "•": "-",
+        "“": '"',
+        "”": '"',
+        "‘": "'",
+        "’": "'",
+        "…": "...",
+        "\u00a0": " ",
+        "⚡": "",
+        "👋": "",
+        "✅": "",
+        "🚫": "",
+        "📄": "",
+        "📋": "",
+        "⚙️": "",
+        "🔻": "",
+        "📜": "",
+        "🏗️": ""
+    }
+
+    text = str(text)
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
+def get_usage(phone: str) -> int:
+    result = c.execute(
+        "SELECT quote_count FROM usage_tracking WHERE user_phone=?",
+        (phone,)
+    ).fetchone()
+
+    if result:
+        return int(result[0])
+
+    c.execute(
+        "INSERT INTO usage_tracking (user_phone, quote_count) VALUES (?, 0)",
+        (phone,)
+    )
+    conn.commit()
+    return 0
+
+
+def increment_usage(phone: str) -> None:
+    c.execute("""
+        INSERT INTO usage_tracking (user_phone, quote_count)
+        VALUES (?, 1)
+        ON CONFLICT(user_phone)
+        DO UPDATE SET quote_count = quote_count + 1
+    """, (phone,))
+    conn.commit()
+
 
 def make_pdf_bytes(
     user_name: str,
@@ -140,49 +217,53 @@ def make_pdf_bytes(
     pdf.set_auto_page_break(auto=True, margin=15)
 
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(190, 10, "ARLO QUOTATION", ln=True, align="C")
+    pdf.cell(190, 10, safe_text("ARLO QUOTATION"), ln=True, align="C")
 
     pdf.ln(6)
     pdf.set_font("Arial", size=11)
-    pdf.cell(190, 8, f"Prepared for: {user_name}", ln=True)
-    pdf.cell(190, 8, f"Project / Service: {project_name}", ln=True)
-    pdf.cell(190, 8, f"Date: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
+    pdf.cell(190, 8, safe_text(f"Prepared for: {user_name}"), ln=True)
+    pdf.cell(190, 8, safe_text(f"Project / Service: {project_name}"), ln=True)
+    pdf.cell(190, 8, safe_text(f"Date: {datetime.now().strftime('%Y-%m-%d')}"), ln=True)
     valid_until = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
-    pdf.cell(190, 8, f"Valid until: {valid_until}", ln=True)
+    pdf.cell(190, 8, safe_text(f"Valid until: {valid_until}"), ln=True)
 
     pdf.ln(10)
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 8, "Price Summary", ln=True)
+    pdf.cell(190, 8, safe_text("Price Summary"), ln=True)
 
     pdf.set_font("Arial", size=11)
     summary_text = (
-        f"Total Price (excluding VAT): **R{price:,.0f}**\n"
+        f"Total Price (excluding VAT): R{price:,.0f}\n"
         f"VAT @ 15%: R{price * 0.15:,.0f}\n\n"
-        f"**Total Amount Due (including VAT): R{price * 1.15:,.0f}**"
+        f"Total Amount Due (including VAT): R{price * 1.15:,.0f}"
     )
-    pdf.multi_cell(180, 8, summary_text)
+    pdf.multi_cell(180, 8, safe_text(summary_text))
 
     pdf.ln(12)
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 8, "Project Breakdown", ln=True)
+    pdf.cell(190, 8, safe_text("Project Breakdown"), ln=True)
 
     pdf.set_font("Arial", size=10)
     for idx, item in enumerate(boq_items, start=1):
-        name = item['name'] if item['name'] else f"Line {idx}"
-        line = f"{idx}. {name}  —  Qty: {item['qty']:,.2f}  |  Rate: R{item['rate']:,.0f}  |  Subtotal: R{item['cost']:,.0f}"
-        pdf.multi_cell(0, 7, line)
+        name = item["name"] if item["name"] else f"Line {idx}"
+        line = (
+            f"{idx}. {name} - Qty: {item['qty']:,.2f} | "
+            f"Rate: R{item['rate']:,.0f} | "
+            f"Subtotal: R{item['cost']:,.0f}"
+        )
+        pdf.multi_cell(0, 7, safe_text(line))
         pdf.ln(2)
 
     if is_admin:
         pdf.ln(12)
         pdf.set_font("Arial", "B", 11)
-        pdf.cell(190, 8, "Internal Pricing Details (Admin Only)", ln=True)
+        pdf.cell(190, 8, safe_text("Internal Pricing Details (Admin Only)"), ln=True)
         pdf.set_font("Arial", size=10)
-        pdf.multi_cell(0, 7, "(This section is hidden from clients)")
+        pdf.multi_cell(0, 7, safe_text("(This section is hidden from clients)"))
 
     pdf.ln(12)
     footer = (
-        "Prepared by ARLO – The Profit Prophet\n\n"
+        "Prepared by ARLO - The Profit Prophet\n\n"
         "Payment Terms: 50% deposit on acceptance, balance on completion.\n"
         "Inclusions: As detailed in the breakdown above.\n"
         "Exclusions: Variations, additional work, unforeseen conditions.\n"
@@ -190,10 +271,9 @@ def make_pdf_bytes(
         "Quote valid for 30 days from date of issue."
     )
     pdf.set_font("Arial", size=9)
-    pdf.multi_cell(0, 6, footer)
+    pdf.multi_cell(0, 6, safe_text(footer))
 
-    output = pdf.output(dest='S').encode('latin-1', errors='ignore')
-    return output
+    return pdf.output(dest="S").encode("latin-1", errors="ignore")
 
 # =========================================================
 # SESSION STATE
@@ -204,31 +284,90 @@ if "boq" not in st.session_state:
 if "last_saved_key" not in st.session_state:
     st.session_state.last_saved_key = None
 
+if "user" not in st.session_state:
+    st.session_state.user = None
+
 # =========================================================
-# UI – HEADER & AUTH
+# UI – HEADER
 # =========================================================
-st.title("🏗️ ARLO Pricing Engine")
+st.title("🏗️ ARLO Pricing Assistant")
 st.caption("Professional quoting. Margin protected.")
 
-user_phone = st.text_input("WhatsApp number", placeholder="e.g. 082 456 7890")
+# =========================================================
+# AUTH / SESSION LOGIN
+# =========================================================
+if st.session_state.user is None:
+    login_phone = st.text_input(
+        "WhatsApp number",
+        placeholder="e.g. 0712345678"
+    )
 
-if not user_phone:
-    st.info("Enter your number to continue.")
-    st.stop()
+    if not login_phone:
+        st.info("Enter your number to continue.")
+        st.stop()
 
-user_phone = user_phone.strip()
+    login_phone = login_phone.strip()
 
-if user_phone not in AUTHORIZED_USERS:
-    st.error("Number not authorized.")
-    st.stop()
+    if login_phone not in AUTHORIZED_USERS:
+        st.error("Number not authorized.")
+        st.stop()
 
-user_name = AUTHORIZED_USERS[user_phone]
+    st.session_state.user = login_phone
+    st.rerun()
+
+user_phone = st.session_state.user
+user_name = BUSINESS_MAP.get(user_phone, user_phone)
 is_admin = user_phone in ADMIN_NUMBERS
 
-st.success(f"Welcome back, {user_name}")
-if is_admin:
-    st.info("Admin mode active")
+# =========================================================
+# WELCOME BANNER
+# =========================================================
+st.markdown(
+    f"""
+    <div style="background: linear-gradient(135deg, #1e3a8a, #3b82f6); color: white; padding: 24px; border-radius: 12px; margin-bottom: 28px; text-align: center;">
+        <h2 style="margin: 0; font-size: 2.1rem;">👋 Welcome back, {user_name}!</h2>
+        <p style="margin: 12px 0 0; font-size: 1.1rem; opacity: 0.95;">Ready to create another sharp quote? ⚡</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
+# =========================================================
+# SIDEBAR
+# =========================================================
+st.sidebar.markdown(f"**Logged in as**  \n{user_name}")
+st.sidebar.markdown(f"Phone: `{user_phone}`")
+
+if is_admin:
+    st.sidebar.success("Admin Mode Active")
+
+if st.sidebar.button("Logout"):
+    st.session_state.user = None
+    st.session_state.boq = []
+    st.session_state.last_saved_key = None
+    st.rerun()
+
+# =========================================================
+# USAGE DISPLAY
+# =========================================================
+usage = get_usage(user_phone)
+
+if not is_admin:
+    remaining = max(0, USAGE_LIMIT - usage)
+
+    uc1, uc2 = st.columns(2)
+    uc1.metric("Quotes Used", f"{usage}/{USAGE_LIMIT}")
+    uc2.metric("Remaining", remaining)
+
+    if usage >= USAGE_LIMIT:
+        st.error("🚫 Quote limit reached (15). Upgrade required.")
+        st.stop()
+    elif remaining <= 3:
+        st.warning("⚠️ You're almost out of quotes. Upgrade soon to avoid disruption.")
+
+# =========================================================
+# PROJECT NAME
+# =========================================================
 project_name = st.text_input("Project / Service Name", value="General Scope")
 
 # =========================================================
@@ -239,7 +378,12 @@ st.subheader("📋 Project Items")
 col_a, col_b = st.columns(2)
 with col_a:
     if st.button("➕ Add Line", use_container_width=True):
-        st.session_state.boq.append({"name": "", "qty": 1.0, "rate": 0.0, "labour_pct": 50})
+        st.session_state.boq.append({
+            "name": "",
+            "qty": 1.0,
+            "rate": 0.0,
+            "labour_pct": 50
+        })
         st.rerun()
 
 with col_b:
@@ -248,17 +392,44 @@ with col_b:
         st.session_state.last_saved_key = None
         st.rerun()
 
-total_direct_cost = labour_portion = material_portion = 0.0
+total_direct_cost = 0.0
+labour_portion = 0.0
+material_portion = 0.0
 boq_snapshot = []
 
 for i, item in enumerate(st.session_state.boq):
     with st.expander(f"Line {i+1}", expanded=True):
         c1, c2, c3 = st.columns(3)
-        item["name"] = c1.text_input("Description", value=item["name"], key=f"name_{i}")
-        item["qty"]  = c2.number_input("Quantity", min_value=0.0, value=float(item["qty"]), step=0.1, key=f"qty_{i}")
-        item["rate"] = c3.number_input("Unit Rate", min_value=0.0, value=float(item["rate"]), step=10.0, key=f"rate_{i}")
 
-        item["labour_pct"] = st.slider("Labour portion %", 0, 100, int(item["labour_pct"]), key=f"lab_{i}")
+        item["name"] = c1.text_input(
+            "Description",
+            value=item["name"],
+            key=f"name_{i}"
+        )
+
+        item["qty"] = c2.number_input(
+            "Quantity",
+            min_value=0.0,
+            value=float(item["qty"]),
+            step=0.1,
+            key=f"qty_{i}"
+        )
+
+        item["rate"] = c3.number_input(
+            "Unit Rate",
+            min_value=0.0,
+            value=float(item["rate"]),
+            step=10.0,
+            key=f"rate_{i}"
+        )
+
+        item["labour_pct"] = st.slider(
+            "Labour portion %",
+            0,
+            100,
+            int(item["labour_pct"]),
+            key=f"lab_{i}"
+        )
 
         cost = float(item["qty"]) * float(item["rate"])
         labour = cost * (item["labour_pct"] / 100)
@@ -291,11 +462,26 @@ st.divider()
 # =========================================================
 st.subheader("⚙️ Markup & Margin")
 
-c1, c2 = st.columns(2)
-with c1:
-    overhead_pct = st.number_input("Overhead / Business %", 0.0, 100.0, 20.0, step=0.5, format="%.1f")
-with c2:
-    margin_pct = st.number_input("Desired Margin %", 1.0, 99.0, 30.0, step=0.5, format="%.1f")
+pc1, pc2 = st.columns(2)
+with pc1:
+    overhead_pct = st.number_input(
+        "Overhead / Business %",
+        min_value=0.0,
+        max_value=100.0,
+        value=20.0,
+        step=0.5,
+        format="%.1f"
+    )
+
+with pc2:
+    margin_pct = st.number_input(
+        "Desired Margin %",
+        min_value=1.0,
+        max_value=99.0,
+        value=30.0,
+        step=0.5,
+        format="%.1f"
+    )
 
 if total_direct_cost <= 0:
     st.info("Add at least one line item to see pricing.")
@@ -310,7 +496,7 @@ margin = (profit / price) * 100 if price > 0 else 0
 walk_away = total_cost * 1.25
 
 # =========================================================
-# RESULTS (internal view)
+# RESULTS (INTERNAL VIEW)
 # =========================================================
 with st.expander("Pricing Summary (internal)", expanded=is_admin):
     cols = st.columns(3)
@@ -330,59 +516,103 @@ with st.expander("Pricing Summary (internal)", expanded=is_admin):
 
     st.metric("Achieved Margin", f"{margin:.1f}%")
 
-    if margin < 15:    st.error("Margin very low — high risk")
-    elif margin < 25:  st.warning("Margin quite thin — be cautious")
-    else:              st.success("Healthy margin range")
+    if margin < 15:
+        st.error("Margin very low - high risk")
+    elif margin < 25:
+        st.warning("Margin quite thin - be cautious")
+    else:
+        st.success("Healthy margin range")
 
 # =========================================================
 # ACTIONS
 # =========================================================
 act1, act2 = st.columns(2)
 
-quote_key = (user_phone, project_name, round(total_cost,2), round(price,2), round(margin,2), len(boq_snapshot))
+quote_key = (
+    user_phone,
+    project_name,
+    round(total_cost, 2),
+    round(price, 2),
+    round(margin, 2),
+    len(boq_snapshot)
+)
+
+save_disabled = (not is_admin and usage >= USAGE_LIMIT)
+pdf_disabled = (not is_admin and usage >= USAGE_LIMIT)
 
 with act1:
-    if st.button("💾 Save Quote", use_container_width=True):
+    if st.button("💾 Save Quote", use_container_width=True, disabled=save_disabled):
         if st.session_state.last_saved_key == quote_key:
             st.info("Already saved (no changes)")
         else:
             save_quote((
-                user_phone, user_name, project_name,
-                total_direct_cost, labour_portion, material_portion,
-                float(overhead_pct), overhead_amount, total_cost,
-                price, suggested, profit, margin, walk_away,
+                user_phone,
+                user_name,
+                project_name,
+                total_direct_cost,
+                labour_portion,
+                material_portion,
+                float(overhead_pct),
+                overhead_amount,
+                total_cost,
+                price,
+                suggested,
+                profit,
+                margin,
+                walk_away,
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ))
+
+            if not is_admin:
+                increment_usage(user_phone)
+                usage = get_usage(user_phone)
+
             st.session_state.last_saved_key = quote_key
             st.success("Quote saved")
+            st.rerun()
 
 with act2:
-    pdf_data = make_pdf_bytes(
-        user_name=user_name,
-        project_name=project_name,
-        price=price,
-        boq_items=boq_snapshot,
-        is_admin=is_admin
-    )
-    st.download_button(
-        "📄 Download Client Quotation",
-        pdf_data,
-        file_name=f"ARLO_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-        mime="application/pdf",
-        use_container_width=True
-    )
+    if pdf_disabled:
+        st.button(
+            "📄 Download Client Quotation",
+            disabled=True,
+            use_container_width=True
+        )
+    else:
+        pdf_data = make_pdf_bytes(
+            user_name=user_name,
+            project_name=project_name,
+            price=price,
+            boq_items=boq_snapshot,
+            is_admin=is_admin
+        )
+
+        st.download_button(
+            "📄 Download Client Quotation",
+            data=pdf_data,
+            file_name=f"ARLO_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
 
 # =========================================================
 # DISCOUNT SIMULATOR
 # =========================================================
 st.subheader("🔻 Quick Discount Check")
+
 disc = st.slider("Discount %", 0, 25, 0)
 
 if disc > 0:
-    new_price = price * (1 - disc/100)
+    new_price = price * (1 - disc / 100)
     new_profit = new_price - total_cost
-    new_margin = (new_profit / new_price)*100 if new_price > 0 else 0
-    st.warning(f"After {disc}% discount:\n\n**Price:** R{new_price:,.0f}\n**Profit:** R{new_profit:,.0f}\n**Margin:** {new_margin:.1f}%")
+    new_margin = (new_profit / new_price) * 100 if new_price > 0 else 0
+
+    st.warning(
+        f"After {disc}% discount:\n\n"
+        f"**Price:** R{new_price:,.0f}\n"
+        f"**Profit:** R{new_profit:,.0f}\n"
+        f"**Margin:** {new_margin:.1f}%"
+    )
 
 # =========================================================
 # HISTORY
@@ -398,7 +628,7 @@ if quotes_df.empty:
     st.info("No saved quotes yet")
 else:
     for _, r in quotes_df.iterrows():
-        with st.expander(f"{r['timestamp']} — R{r['price']:,.0f}"):
+        with st.expander(f"{r['timestamp']} - R{r['price']:,.0f}"):
             st.write(f"**Client** {r['client_name']}")
             st.write(f"**Project/Service** {r['project']}")
             st.write(f"Total Cost: R{r['total_cost']:,.0f}")
@@ -406,5 +636,8 @@ else:
             st.write(f"Margin: {r['margin']:.1f}%")
             st.write(f"Suggested: R{r['suggested']:,.0f}")
 
+# =========================================================
+# FOOTER
+# =========================================================
 st.markdown("---")
-st.caption("ARLO • Multi-industry Pricing • v1.3 – Client PDF safe")
+st.caption("ARLO • Multi-industry Pricing • v1.5 - Full client list + usage tracking + PDF safe")
