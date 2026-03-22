@@ -43,6 +43,12 @@ AUTHORIZED_USERS = {
     "0672567151": "Ipotau Projects",
     "0659994443": "The Profit Prophet (Admin)",
     "0736826931": "Rohan Basson (Admin)",
+    "0699307681": "Apex Electro Dynamics",
+    "0686807333": "Boneh Projects",
+    "0722396885": "Power Water Solutions",
+    "0620136344": "Loyal Construction",
+    "0660417821": "Handyman Andries",
+    "0718357947": "Champion Renovations"
 }
 
 # =========================================================
