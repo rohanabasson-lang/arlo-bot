@@ -70,12 +70,6 @@ st.markdown(
         padding: 14px;
         border-radius: 14px;
     }
-    div[data-testid="stMetric"] {
-        background: #0f172a;
-        border: 1px solid #1e293b;
-        padding: 14px;
-        border-radius: 14px;
-    }
     </style>
     """,
     unsafe_allow_html=True
@@ -148,7 +142,34 @@ def get_all_quotes() -> pd.DataFrame:
     )
 
 
-def safe_text(text) -> str:
+def get_usage(phone: str) -> int:
+    result = c.execute(
+        "SELECT quote_count FROM usage_tracking WHERE user_phone=?",
+        (phone,)
+    ).fetchone()
+
+    if result:
+        return int(result[0])
+
+    c.execute(
+        "INSERT INTO usage_tracking (user_phone, quote_count) VALUES (?, 0)",
+        (phone,)
+    )
+    conn.commit()
+    return 0
+
+
+def increment_usage(phone: str) -> None:
+    c.execute("""
+        INSERT INTO usage_tracking (user_phone, quote_count)
+        VALUES (?, 1)
+        ON CONFLICT(user_phone)
+        DO UPDATE SET quote_count = quote_count + 1
+    """, (phone,))
+    conn.commit()
+
+
+def safe_text(text: str) -> str:
     replacements = {
         "—": "-",
         "–": "-",
@@ -178,31 +199,39 @@ def safe_text(text) -> str:
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
-def get_usage(phone: str) -> int:
-    result = c.execute(
-        "SELECT quote_count FROM usage_tracking WHERE user_phone=?",
-        (phone,)
-    ).fetchone()
+class QuotePDF(FPDF):
+    def header(self):
+        self.set_fill_color(30, 58, 138)
+        self.rect(0, 0, 210, 24, "F")
 
-    if result:
-        return int(result[0])
+        self.set_text_color(255, 255, 255)
+        self.set_font("Arial", "B", 18)
+        self.cell(0, 12, safe_text("ARLO QUOTATION"), ln=True, align="C")
 
-    c.execute(
-        "INSERT INTO usage_tracking (user_phone, quote_count) VALUES (?, 0)",
-        (phone,)
-    )
-    conn.commit()
-    return 0
+        self.set_font("Arial", size=9)
+        self.cell(0, 0, safe_text("Professional quoting. Margin protected."), align="C")
+
+        self.ln(10)
+        self.set_text_color(0, 0, 0)
+
+    def footer(self):
+        self.set_y(-18)
+        self.set_draw_color(220, 220, 220)
+        self.line(10, self.get_y(), 200, self.get_y())
+
+        self.ln(3)
+        self.set_font("Arial", size=8)
+        self.set_text_color(100, 100, 100)
+        self.cell(0, 5, safe_text("Prepared by ARLO - The Profit Prophet"), ln=True, align="C")
+        self.cell(0, 5, safe_text(f"Page {self.page_no()}"), align="C")
 
 
-def increment_usage(phone: str) -> None:
-    c.execute("""
-        INSERT INTO usage_tracking (user_phone, quote_count)
-        VALUES (?, 1)
-        ON CONFLICT(user_phone)
-        DO UPDATE SET quote_count = quote_count + 1
-    """, (phone,))
-    conn.commit()
+def pdf_section_title(pdf: FPDF, title: str) -> None:
+    pdf.set_fill_color(245, 247, 250)
+    pdf.set_draw_color(220, 220, 220)
+    pdf.set_font("Arial", "B", 11)
+    pdf.cell(0, 8, safe_text(title), border=1, ln=True, fill=True)
+    pdf.ln(2)
 
 
 def make_pdf_bytes(
@@ -212,68 +241,127 @@ def make_pdf_bytes(
     boq_items: list[dict],
     is_admin: bool = False
 ) -> bytes:
-    pdf = FPDF()
+    pdf = QuotePDF()
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_auto_page_break(auto=True, margin=20)
 
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(190, 10, safe_text("ARLO QUOTATION"), ln=True, align="C")
+    quote_date = datetime.now().strftime("%Y-%m-%d")
+    valid_until = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+    vat_amount = price * 0.15
+    total_incl_vat = price * 1.15
 
-    pdf.ln(6)
-    pdf.set_font("Arial", size=11)
-    pdf.cell(190, 8, safe_text(f"Prepared for: {user_name}"), ln=True)
-    pdf.cell(190, 8, safe_text(f"Project / Service: {project_name}"), ln=True)
-    pdf.cell(190, 8, safe_text(f"Date: {datetime.now().strftime('%Y-%m-%d')}"), ln=True)
-    valid_until = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
-    pdf.cell(190, 8, safe_text(f"Valid until: {valid_until}"), ln=True)
+    # -----------------------------------------------------
+    # CLIENT + QUOTE INFO
+    # -----------------------------------------------------
+    pdf.ln(4)
 
-    pdf.ln(10)
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 8, safe_text("Price Summary"), ln=True)
+    left_x = pdf.get_x()
+    top_y = pdf.get_y()
 
-    pdf.set_font("Arial", size=11)
-    summary_text = (
-        f"Total Price (excluding VAT): R{price:,.0f}\n"
-        f"VAT @ 15%: R{price * 0.15:,.0f}\n\n"
-        f"Total Amount Due (including VAT): R{price * 1.15:,.0f}"
-    )
-    pdf.multi_cell(180, 8, safe_text(summary_text))
-
-    pdf.ln(12)
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 8, safe_text("Project Breakdown"), ln=True)
+    pdf.set_font("Arial", "B", 11)
+    pdf.cell(95, 8, safe_text("Prepared For"), border=1, ln=0)
+    pdf.cell(0, 8, safe_text("Quotation Details"), border=1, ln=1)
 
     pdf.set_font("Arial", size=10)
-    for idx, item in enumerate(boq_items, start=1):
-        name = item["name"] if item["name"] else f"Line {idx}"
-        line = (
-            f"{idx}. {name} - Qty: {item['qty']:,.2f} | "
-            f"Rate: R{item['rate']:,.0f} | "
-            f"Subtotal: R{item['cost']:,.0f}"
-        )
-        pdf.multi_cell(0, 7, safe_text(line))
-        pdf.ln(2)
+    pdf.cell(95, 8, safe_text(user_name), border=1, ln=0)
+    pdf.cell(0, 8, safe_text(f"Date: {quote_date}"), border=1, ln=1)
 
-    if is_admin:
-        pdf.ln(12)
-        pdf.set_font("Arial", "B", 11)
-        pdf.cell(190, 8, safe_text("Internal Pricing Details (Admin Only)"), ln=True)
-        pdf.set_font("Arial", size=10)
-        pdf.multi_cell(0, 7, safe_text("(This section is hidden from clients)"))
+    pdf.cell(95, 8, safe_text(project_name), border=1, ln=0)
+    pdf.cell(0, 8, safe_text(f"Valid Until: {valid_until}"), border=1, ln=1)
 
-    pdf.ln(12)
+    pdf.ln(6)
+
+    # -----------------------------------------------------
+    # PRICE SUMMARY
+    # -----------------------------------------------------
+    pdf_section_title(pdf, "Price Summary")
+
+    pdf.set_font("Arial", size=10)
+    pdf.cell(120, 8, safe_text("Total Price (excluding VAT)"), border=1, ln=0)
+    pdf.cell(0, 8, safe_text(f"R{price:,.0f}"), border=1, ln=1)
+
+    pdf.cell(120, 8, safe_text("VAT @ 15%"), border=1, ln=0)
+    pdf.cell(0, 8, safe_text(f"R{vat_amount:,.0f}"), border=1, ln=1)
+
+    pdf.set_font("Arial", "B", 11)
+    pdf.cell(120, 9, safe_text("Total Amount Due (including VAT)"), border=1, ln=0)
+    pdf.cell(0, 9, safe_text(f"R{total_incl_vat:,.0f}"), border=1, ln=1)
+
+    pdf.ln(6)
+
+    # -----------------------------------------------------
+    # PROJECT BREAKDOWN
+    # -----------------------------------------------------
+    pdf_section_title(pdf, "Project Breakdown")
+
+    pdf.set_font("Arial", "B", 10)
+    pdf.set_fill_color(235, 240, 248)
+    pdf.cell(12, 8, "#", border=1, align="C", fill=True)
+    pdf.cell(88, 8, safe_text("Description"), border=1, fill=True)
+    pdf.cell(25, 8, safe_text("Qty"), border=1, align="C", fill=True)
+    pdf.cell(30, 8, safe_text("Rate"), border=1, align="R", fill=True)
+    pdf.cell(35, 8, safe_text("Subtotal"), border=1, align="R", ln=1, fill=True)
+
+    pdf.set_font("Arial", size=9)
+
+    if not boq_items:
+        pdf.cell(190, 8, safe_text("No line items captured."), border=1, ln=1)
+    else:
+        for idx, item in enumerate(boq_items, start=1):
+            name = item["name"] if item["name"] else f"Line {idx}"
+            qty_text = f"{item['qty']:,.2f}"
+            rate_text = f"R{item['rate']:,.0f}"
+            subtotal_text = f"R{item['cost']:,.0f}"
+
+            row_start_y = pdf.get_y()
+
+            pdf.cell(12, 8, safe_text(str(idx)), border=1, align="C")
+            x_after_idx = pdf.get_x()
+            y_after_idx = pdf.get_y()
+
+            # description as multicell
+            pdf.multi_cell(88, 8, safe_text(name), border=1)
+            desc_end_y = pdf.get_y()
+
+            # align remaining cells to same row height
+            row_height = desc_end_y - row_start_y
+            if row_height < 8:
+                row_height = 8
+
+            pdf.set_xy(x_after_idx + 88, row_start_y)
+            pdf.cell(25, row_height, safe_text(qty_text), border=1, align="C")
+            pdf.cell(30, row_height, safe_text(rate_text), border=1, align="R")
+            pdf.cell(35, row_height, safe_text(subtotal_text), border=1, align="R")
+            pdf.ln()
+
+    pdf.ln(6)
+
+    # -----------------------------------------------------
+    # TERMS
+    # -----------------------------------------------------
+    pdf_section_title(pdf, "Terms & Notes")
+
+    pdf.set_font("Arial", size=9)
     footer = (
-        "Prepared by ARLO - The Profit Prophet\n\n"
         "Payment Terms: 50% deposit on acceptance, balance on completion.\n"
         "Inclusions: As detailed in the breakdown above.\n"
         "Exclusions: Variations, additional work, unforeseen conditions.\n"
         "All prices exclude VAT unless stated otherwise.\n"
         "Quote valid for 30 days from date of issue."
     )
-    pdf.set_font("Arial", size=9)
     pdf.multi_cell(0, 6, safe_text(footer))
 
-    return pdf.output(dest="S").encode("latin-1", errors="ignore")
+    if is_admin:
+        pdf.ln(4)
+        pdf_section_title(pdf, "Internal Pricing Details (Admin Only)")
+        pdf.set_font("Arial", size=9)
+        pdf.multi_cell(0, 6, safe_text("(This section is hidden from clients)"))
+
+    pdf_bytes = pdf.output(dest="S")
+    if isinstance(pdf_bytes, str):
+        pdf_bytes = pdf_bytes.encode("latin-1", errors="ignore")
+
+    return pdf_bytes
 
 # =========================================================
 # SESSION STATE
@@ -565,7 +653,6 @@ with act1:
 
             if not is_admin:
                 increment_usage(user_phone)
-                usage = get_usage(user_phone)
 
             st.session_state.last_saved_key = quote_key
             st.success("Quote saved")
@@ -599,7 +686,6 @@ with act2:
 # DISCOUNT SIMULATOR
 # =========================================================
 st.subheader("🔻 Quick Discount Check")
-
 disc = st.slider("Discount %", 0, 25, 0)
 
 if disc > 0:
@@ -636,8 +722,5 @@ else:
             st.write(f"Margin: {r['margin']:.1f}%")
             st.write(f"Suggested: R{r['suggested']:,.0f}")
 
-# =========================================================
-# FOOTER
-# =========================================================
 st.markdown("---")
-st.caption("ARLO • Multi-industry Pricing • v1.5 - Full client list + usage tracking + PDF safe")
+st.caption("ARLO • Multi-industry Pricing")
