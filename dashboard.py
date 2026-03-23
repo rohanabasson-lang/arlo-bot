@@ -42,7 +42,8 @@ AUTHORIZED_USERS = {
     "0722396885": "Power Water Solutions",
     "0620136344": "Loyal Construction",
     "0660417821": "Handyman Andries",
-    "0718357947": "Champion Renovations"
+    "0718357947": "Champion Renovations",
+    "0630470334": "Bonokara holdings PTY LTD"   # ← added here
 }
 
 BUSINESS_MAP = AUTHORIZED_USERS
@@ -308,7 +309,7 @@ if not is_admin:
         st.warning(f"Only {remaining} quotes left this month.")
 
 st.title("🏗️ ARLO Pricing Assistant")
-st.caption("Built for SA contractors")
+st.caption("BY THE PROFIT PROPHET • Built for SA contractors")
 
 st.sidebar.markdown(f"**Logged in as**  \n{user_name}")
 st.sidebar.markdown(f"Phone: `{user_phone}`")
