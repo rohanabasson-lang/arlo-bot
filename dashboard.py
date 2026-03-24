@@ -13,7 +13,7 @@ USAGE_LIMIT = 15
 ADMIN_NUMBERS = ["0659994443", "0736826931"]
 
 AUTHORIZED_USERS = {
-    "0795659007": "Ahluma Construction and Trading",
+   "0795659007": "Ahluma Construction and Trading",
     "0815555088": "Ben Lutumba Construction",
     "0626011810": "Imabacon Projects",
     "0829980714": "Orion Shades and Steel Worx",
@@ -43,7 +43,13 @@ AUTHORIZED_USERS = {
     "0620136344": "Loyal Construction",
     "0660417821": "Handyman Andries",
     "0718357947": "Champion Renovations",
-    "0630470334": "Bonokara holdings PTY LTD"   # ← added here
+    "0630470334": "Bonokara holdings PTY LTD",
+    "0621644009": "Handyman Ettie G",
+    "0787809377": "Cape Project",
+    "0655555803": "Keysquared Construction",
+    "0797342525": "Mpofane Holding",
+    "0828425769": "Welethu Electrical Group",
+    "0765023797": "BM Construction"   # ← added here
 }
 
 BUSINESS_MAP = AUTHORIZED_USERS
