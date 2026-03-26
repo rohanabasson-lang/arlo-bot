@@ -12,48 +12,6 @@ USAGE_LIMIT = 15
 
 ADMIN_NUMBERS = ["0659994443", "0736826931"]
 
-AUTHORIZED_USERS = {
-   "0795659007": "Ahluma Construction and Trading",
-    "0815555088": "Ben Lutumba Construction",
-    "0626011810": "Imabacon Projects",
-    "0829980714": "Orion Shades and Steel Worx",
-    "0730434326": "TAAL Projects and Civil Contractors",
-    "0693794420": "Tripoli Private Investigators Security Systems Pty Ltd",
-    "0631172296": "Volts and Amps Engineering (Solar/Electrical)",
-    "0828431430": "Marz Construction",
-    "0792001200": "Comma Group Pty Ltd",
-    "0678201965": "JMF Construction",
-    "0768976484": "Kusasa Projects and Maintenance Pty Ltd",
-    "0731196550": "Energon Holdings Pty Ltd",
-    "0678866227": "Reliable Painters Pty Ltd",
-    "0656611289": "Lenyakallo Projects",
-    "0730970027": "Myc-services Construction Pty Ltd",
-    "0678250880": "NBH Construction Pty Ltd",
-    "0795970690": "Bra Joe Steelworks and Construction",
-    "0719152903": "Jobfellas",
-    "0799722549": "Wiseinn Landscapes",
-    "0787247849": "M S Kathide",
-    "0660548678": "Ngwenya Property Rehab",
-    "0672567151": "Ipotau Projects",
-    "0659994443": "The Profit Prophet (Admin)",
-    "0736826931": "Rohan Basson (Admin)",
-    "0699307681": "Apex Electro Dynamics",
-    "0686807333": "Boneh Projects",
-    "0722396885": "Power Water Solutions",
-    "0620136344": "Loyal Construction",
-    "0660417821": "Handyman Andries",
-    "0718357947": "Champion Renovations",
-    "0630470334": "Bonokara holdings PTY LTD",
-    "0621644009": "Handyman Ettie G",
-    "0787809377": "Cape Project",
-    "0655555803": "Keysquared Construction",
-    "0797342525": "Mpofane Holding",
-    "0828425769": "Welethu Electrical Group",
-    "0765023797": "BM Construction"   # ← added here
-}
-
-BUSINESS_MAP = AUTHORIZED_USERS
-
 st.markdown("""
 <style>
 .block-container {padding-top: 1.5rem; padding-bottom: 2rem; max-width: 1100px;}
@@ -232,11 +190,9 @@ def make_pdf_bytes(user_name, client_name, client_phone, project_name, final_pri
     pdf.set_font("Arial", "B", 10)
     pdf.set_fill_color(235, 240, 248)
     pdf.cell(12, 8, "#", border=1, align="C", fill=True)
-    pdf.cell(70, 8, "Description", border=1, fill=True)
+    pdf.cell(85, 8, "Description", border=1, fill=True)   # Wider description
     pdf.cell(20, 8, "Qty", border=1, align="C", fill=True)
-    pdf.cell(25, 8, "Rate", border=1, align="R", fill=True)
-    pdf.cell(30, 8, "Labour", border=1, align="R", fill=True)
-    pdf.cell(30, 8, "Material/Other", border=1, align="R", fill=True)
+    pdf.cell(30, 8, "Rate", border=1, align="R", fill=True)
     pdf.cell(35, 8, "Subtotal", border=1, align="R", ln=1, fill=True)
 
     pdf.set_font("Arial", size=9)
@@ -244,21 +200,16 @@ def make_pdf_bytes(user_name, client_name, client_phone, project_name, final_pri
         name = safe_text(item.get("name") or f"Line {idx}")
         qty = item.get('qty', 0)
         rate = item.get('rate', 0)
-        labour_pct = item.get('labour_pct', 50)
-        cost = qty * rate
-        labour = cost * (labour_pct / 100)
-        material = cost - labour
+        cost = qty * rate   # Bundled total
 
         row_y = pdf.get_y()
         pdf.cell(12, 8, str(idx), border=1, align="C")
         x = pdf.get_x()
-        pdf.multi_cell(70, 8, name, border=1)
+        pdf.multi_cell(85, 8, name, border=1)
         h = max(pdf.get_y() - row_y, 8)
-        pdf.set_xy(x + 70, row_y)
+        pdf.set_xy(x + 85, row_y)
         pdf.cell(20, h, f"{qty:,.2f}", border=1, align="C")
-        pdf.cell(25, h, f"R{rate:,.0f}", border=1, align="R")
-        pdf.cell(30, h, f"R{labour:,.0f}", border=1, align="R")
-        pdf.cell(30, h, f"R{material:,.0f}", border=1, align="R")
+        pdf.cell(30, h, f"R{rate:,.0f}", border=1, align="R")
         pdf.cell(35, h, f"R{cost:,.0f}", border=1, align="R", ln=1)
 
     pdf.ln(6)
@@ -278,23 +229,12 @@ for key, default in [("boq", []), ("last_saved_key", None), ("user", None), ("pr
     if key not in st.session_state:
         st.session_state[key] = default
 
-# Login
+# Auto-assign a generic user ID for tracking (no login required)
 if st.session_state.user is None:
-    st.markdown("### Login")
-    login_phone = st.text_input("WhatsApp number (your registered business number)", placeholder="e.g. 0712345678")
-    if not login_phone:
-        st.info("Enter your number to continue.")
-        st.stop()
-    login_phone = login_phone.strip().replace(" ", "")
-    if login_phone not in AUTHORIZED_USERS:
-        st.error("Number not authorized.")
-        st.stop()
-    st.session_state.user = login_phone
-    st.success(f"Welcome back, {AUTHORIZED_USERS[login_phone]}!")
-    st.rerun()
+    st.session_state.user = "guest_user"
 
 user_phone = st.session_state.user
-user_name = BUSINESS_MAP.get(user_phone, user_phone)
+user_name = "Guest User"
 is_admin = user_phone in ADMIN_NUMBERS
 
 # Usage tracking
@@ -318,7 +258,6 @@ st.title("🏗️ ARLO Pricing Assistant")
 st.caption("BY THE PROFIT PROPHET • Built for SA contractors")
 
 st.sidebar.markdown(f"**Logged in as**  \n{user_name}")
-st.sidebar.markdown(f"Phone: `{user_phone}`")
 if is_admin: st.sidebar.success("Admin Mode")
 if st.sidebar.button("Logout"):
     for k in list(st.session_state.keys()): del st.session_state[k]
